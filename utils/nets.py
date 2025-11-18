@@ -1,6 +1,7 @@
 from pathlib import Path
 import torch
 from torch import load
+from torch import nn
 from nets.resnet import resnet50
 from nets.clip import ClipLinear
 
@@ -50,3 +51,35 @@ def load_network(namenet, weights_dir):
     else:
         assert False
     return model
+
+def predict_with_model(preprocessed_image, model, model_type, post_function=nn.Softmax(dim=1), resize=False, cuda=True):
+    """
+    Adapted predict_for_model for attack. Differentiable image pre-processing.
+    Predicts the label of an input image. Performs resizing and normalization before feeding in image.
+
+    :param image: torch tenosr (bs, c, h, w)
+    :param model: torch model with linear layer at the end
+    :param post_function: e.g., softmax
+    :param cuda: enables cuda, must be the same parameter as the model
+    :return: prediction (1 = fake, 0 = real), output probs, logits
+    """
+    
+    # Model prediction
+
+    # differentiable resizing: doing resizing here instead of preprocessing
+    if resize == False or model_type == "resnet50":
+        resized_image = preprocessed_image
+    else:
+        resized_image = nn.functional.interpolate(preprocessed_image, size = (224, 224), mode = "bicubic", align_corners = True)
+    if cuda:
+        resized_image = resized_image.cuda()
+    logits = model(resized_image)
+    output = post_function(logits)
+
+    # Cast to desired
+    _, prediction = torch.max(output, 1)    # argmax
+    prediction = float(prediction.cpu().numpy())
+
+    # print ("prediction", prediction)
+    # print ("output", output)
+    return int(prediction), output, logits

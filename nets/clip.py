@@ -47,8 +47,7 @@ class ClipLinear(nn.Module):
     
     def forward_head(self, x):
         y = self.fc(x)
-        return y
-        
+        return torch.cat((torch.zeros_like(y),y),1)
     def forward(self, x):
         return self.forward_head(self.forward_features(x))
 

@@ -20,8 +20,10 @@ if __name__ == '__main__':
         num_workers=1,
         model=detector,
         transform_img=detector.preprocess
-        )
-
+    )
+    
+    is_resnet = type(detector).__name__ == 'ResNet'
+    print(f"is_resnet={is_resnet}")
 
     for i, (image, mask, orig) in enumerate(dataloader):
         # use the un-normalized original resized image (`orig`) instead of the
@@ -33,7 +35,7 @@ if __name__ == '__main__':
         # If `get_vulnerability_map` expects normalized floats, but you want to
         # feed the original image, ensure the function can accept uint8 input.
         # Here we pass `orig` as requested by the user.
-        vuln_map, res = get_vulnerability_map(image, mask, detector, device=device)
+        vuln_map, res = get_vulnerability_map(image, mask, detector, is_resnet=is_resnet, device=device)
         vis = visualize_vulnerability_map(vuln_map, orig)
         plot_triple_res(orig, vis, mask)
 
