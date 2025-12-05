@@ -1,13 +1,13 @@
 {   
-    "run_name" : "pretrained",
-    "device" : "cuda:0",
+    "run_name" : "demo",
+    "device" : "cpu",
     "batch_size_eval" :512,
     "dataset": "TrueFake",
-    "data_path": "/media/NAS/DeepShield/",
-    "split_file": "/home/andrea.montibeller/Image-Deepfake-Detectors-Public-Library/split.json",
+    "data_path": "/Users/francescobassignana/Desktop/school/unitn/adversarial_sensitivity_project/Image-Deepfake-Detectors-Public-Library/demo_images/",
+    "split_file": "/Users/francescobassignana/Desktop/school/unitn/adversarial_sensitivity_project/Image-Deepfake-Detectors-Public-Library/split_demo.json",
     "softmax" : false,
     "prototype" : "fake", 
-    "scenario": ["realFORLAB:fb"],
+    "scenario": ["realFFHQ:fb"],
     "upperbound" : false,
     "random_select" : false,
     "precision" : "fp16"

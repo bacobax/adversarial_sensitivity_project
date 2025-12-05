@@ -98,10 +98,14 @@ class TrueFake_dataset(datasets.DatasetFolder):
         self.data_root = settings.data_root
         self.split = settings.split
 
+        print(f"data root: {self.data_root}, split: {self.split}")
+
         with open(settings.split_file, "r") as f:
             split_list = sorted(json.load(f)[self.split])
         
         dataset_list = parse_dataset(settings)
+
+        print(dataset_list)
         
         self.samples = []
         self.info = []

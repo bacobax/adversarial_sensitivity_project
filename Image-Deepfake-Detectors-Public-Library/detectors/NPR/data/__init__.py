@@ -191,11 +191,14 @@ def create_dataloader(settings, split=None):
 
     dataset = TrueFake_dataset(settings)
 
+    # Avoid multiprocessing issues on macOS / during evaluation by disabling workers when not training
+    num_workers = int(settings.num_threads) if is_train else 0
+
     data_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=settings.batch_size,
-        num_workers=int(settings.num_threads),
-        shuffle = is_train,
+        num_workers=num_workers,
+        shuffle=is_train,
         collate_fn=None,
     )
     return data_loader

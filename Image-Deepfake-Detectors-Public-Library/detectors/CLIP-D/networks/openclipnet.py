@@ -65,7 +65,9 @@ class OpenClipLinear(nn.Module):
     def forward_features(self, x):
         with torch.no_grad():
             self.bb[0].eval()
-            features = self.bb[0].encode_image(x, normalize=self.normalize)
+            features = self.bb[0].encode_image(x)
+            if self.normalize:
+                features = F.normalize(features, dim=-1)
         return features
 
     def forward_head(self, x):
