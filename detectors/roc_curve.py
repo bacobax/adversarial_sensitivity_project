@@ -4,7 +4,7 @@ import pandas as pd
 from sklearn.metrics import roc_auc_score, roc_curve
 
 # --- Load CSV ---------------------------------------------------------------
-df = pd.read_csv("results.csv")  # adjust path
+df = pd.read_csv("results_bak.csv")  # adjust path
 
 global_handles = []  # NEW
 global_labels = []  # NEW
@@ -46,7 +46,7 @@ def main():
     
     ax.set_xlabel("False Positive Rate")
     ax.set_ylabel("True Positive Rate")
-    ax.set_title(f"ROC vs '{real_folder}' (all other folders as positive)")
+    ax.set_title(f"ROC inpainted vs real")
     ax.grid(alpha=0.2)
     ax.legend()
     ax.set_xlim(0, 1)
