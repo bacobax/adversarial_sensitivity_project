@@ -31,3 +31,7 @@ python3.13 detect.py \
 ```bash
 python3.13 -m pip install -r requirements.txt
 ```
+
+```bash
+conda env create -f environment.yml
+```
