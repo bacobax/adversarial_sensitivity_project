@@ -30,45 +30,6 @@ def create_model(weights, arc, cropping, device):
     return model
 
 
-class ReadVideoIteratorCV:
-    def __init__(self, video_path, transform=None, limit=None):
-        """
-        Args:
-            video_path (str): Path to video file.
-            transform (callable, optional): Transform to apply to each frame.
-        """
-        self.video_path = video_path
-        self.transform = transform
-        self.limit = limit
-    
-    def __len__(self):
-        import cv2
-        cap = cv2.VideoCapture(self.video_path)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
-        if self.limit:
-            total_frames = min(total_frames, self.limit)
-        return total_frames
-    
-    def __iter__(self):
-        import cv2
-        cap = cv2.VideoCapture(self.video_path)
-        idx = 0
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-            frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            if self.transform:
-                frame = self.transform(frame)
-            yield idx, frame
-            idx = idx + 1
-            if self.limit:
-                if idx >= self.limit:
-                    break
-        cap.release()
-
-
 class ReadVideoIteratorAV:
     def __init__(self, video_fid, transform=None, limit=None):
         """
