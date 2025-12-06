@@ -13,6 +13,22 @@
 - [R50_TF](https://github.com/MMLab-unitn/TrueFake-IJCNN25)
 - [WaveRep](https://grip-unina.github.io/WaveRep-SyntheticVideoDetection/)
 
+## Dataset
+
+The dataset used for evaluation is [B-Free](https://github.com/grip-unina/B-Free), downloaded from [here](https://www.grip.unina.it/download/prog/B-Free/training_data/).
+
+
+## Download Weights
+
+You can download the weights for each model from this [link](https://drive.google.com/file/d/1F60FN2B9skRcb3YrZwhFTZQihbj3ipJQ/view?usp=sharing).
+
+Then, copy them into the `weights` folder for the corresponding model, following this structure:
+`./models/<DETECTOR>/weights/best.pt`
+
+Download also the classes for P2G detector from [classes.pkl](https://github.com/laitifranz/Prompt2Guard/blob/main/src/utils/classes.pkl) and copy it into the `models/P2G/utils` folder.
+
+
+
 ## Usage
 
 ```bash
