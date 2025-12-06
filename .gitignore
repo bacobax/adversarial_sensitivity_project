@@ -1,12 +1,20 @@
 .idea
 .vscode
+.old
 venv
 .venv
 __pycache__
-**/venv
-**/.venv
-**/__pycache__
-*.pyc
-**/*.pth
+*cache
 
-**/cache
+*.pt
+*.pyc
+*.pkl
+*.pth
+*.zip
+*.tar*
+*.gz
+*.ckpt
+
+b-free
+results*.csv
+weights_dino*
