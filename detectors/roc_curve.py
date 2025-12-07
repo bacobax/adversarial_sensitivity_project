@@ -42,7 +42,7 @@ def main():
         ax.plot(fpr, tpr, label=f"{model} (AUC={auc:.3f})", linewidth=1)
     
     # reference diagonal
-    ax.plot([0, 1], [0, 1], "--", linewidth=1)
+    ax.plot([0, 1], [0, 1], "--", linewidth=1, color="gray")
     
     ax.set_xlabel("False Positive Rate")
     ax.set_ylabel("True Positive Rate")

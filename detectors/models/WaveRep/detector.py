@@ -23,6 +23,9 @@ class WaveRepDetector(BaseDetector):
         self.transform = None
         self.cropping = 512
         self.arc = 'vit_base_patch14_reg4_dinov2.lvd142m'
+        # Inference knobs
+        self.use_tta = True  # horizontal flip TTA
+        self.use_amp = True  # CUDA autocast
     
     def _default_weights(self) -> str:
         # Default weights location within WaveRep repo
@@ -44,9 +47,19 @@ class WaveRepDetector(BaseDetector):
         assert self.transform is not None, "Transform not initialized"
         img = Image.open(image_path).convert('RGB')
         frame = self.transform(img)
+        frames = [frame]
+        if self.use_tta:
+            frames.append(torch.flip(frame, dims=[2]))  # horizontal flip (C,H,W) -> flip W
+        batch = torch.stack(frames, 0).to(self.device)
         with torch.no_grad():
-            logit = self.model(frame[None, ...].to(self.device))[0, -1]
-            prob = torch.sigmoid(logit).item()
+            if self.device.type == 'cuda' and self.use_amp:
+                from torch.cuda.amp import autocast
+                with autocast():
+                    logits = self.model(batch)[:, -1]
+            else:
+                logits = self.model(batch)[:, -1]
+            probs = torch.sigmoid(logits).detach().cpu()
+            prob = float(probs.mean().item())
         return prob
     
     def batch_predict(self, image_paths):
@@ -60,6 +73,24 @@ class WaveRepDetector(BaseDetector):
             return []
         batch = torch.stack(frames, 0).to(self.device)
         with torch.no_grad():
-            logits = self.model(batch)[:, -1]
-            probs = torch.sigmoid(logits).detach().cpu().tolist()
+            if self.device.type == 'cuda' and self.use_amp:
+                from torch.amp import autocast
+                with autocast('cuda'):
+                    logits_main = self.model(batch)[:, -1]
+            else:
+                logits_main = self.model(batch)[:, -1]
+            probs_main = torch.sigmoid(logits_main)
+            if self.use_tta:
+                batch_flip = torch.flip(batch, dims=[3])  # flip width
+                if self.device.type == 'cuda' and self.use_amp:
+                    from torch.amp import autocast
+                    with autocast('cuda'):
+                        logits_flip = self.model(batch_flip)[:, -1]
+                else:
+                    logits_flip = self.model(batch_flip)[:, -1]
+                probs_flip = torch.sigmoid(logits_flip)
+                probs = (probs_main + probs_flip) * 0.5
+            else:
+                probs = probs_main
+            probs = probs.detach().cpu().tolist()
         return [float(x) for x in probs]
