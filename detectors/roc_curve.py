@@ -6,8 +6,8 @@ from sklearn.metrics import roc_auc_score, roc_curve
 # --- Load CSV ---------------------------------------------------------------
 df = pd.read_csv("results.csv")  # adjust path
 
-global_handles = []  # NEW
-global_labels = []  # NEW
+global_handles = []
+global_labels = []
 
 
 def main():
