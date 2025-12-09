@@ -17,6 +17,9 @@ limitations under the License.
 
 
 def create_architecture(name_arch, pretrained=False, num_classes=1):
+    print("ENTERED")
+    print(f"name_arch: {name_arch}")
+    print(f"{name_arch}.startswith('opencliplinearnext_'): {name_arch.startswith('opencliplinearnext_')}")
     if name_arch == "res50nodown":
         from .resnet_mod import resnet50
         
@@ -34,11 +37,13 @@ def create_architecture(name_arch, pretrained=False, num_classes=1):
     elif name_arch.startswith('opencliplinear_'):
         from .openclipnet import OpenClipLinear
         model = OpenClipLinear(num_classes=num_classes, pretrain=name_arch[15:], normalize=True)
+
     elif name_arch.startswith('opencliplinearnext_'):
         from .openclipnet import OpenClipLinear
         model = OpenClipLinear(num_classes=num_classes, pretrain=name_arch[19:], normalize=True, next_to_last=True)
     else:
         assert False
+        #opencliplinearnext_clipL14commonpool
     return model
 
 

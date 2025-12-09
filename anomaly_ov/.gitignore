@@ -1,72 +1,62 @@
 # Python
-__pycache__
+__pycache__/
 *.pyc
-*.egg-info
-dist
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Model weights (large files)
 *.pt
-# Log
+*.pth
+weights/
+
+# Logs and outputs
 *.log
 *.log.*
-# *.json
-# *.jsonl
-finetune_dataset
-# Data
-!**/alpaca-data-conversation.json
+outputs/
+logs/
+
+# Data (large datasets)
+finetune_dataset/
+trends_cv_data/
+data/
+
+# Cache
+cache/
+.cache/
+
 # Editor
-.idea
+.idea/
 *.swp
-.vscode
+.vscode/
 
-# Other
+# OS
 .DS_Store
-wandb
-output
-llavavid
+Thumbs.db
 
-checkpoints
-project_checkpoints
-debug_checkpoints
-playground/data
-playground/cc3m_llava34b_cap
+# Jupyter
+.ipynb_checkpoints/
+
+# Wandb
+wandb/
+
+# Project specific
+checkpoints/
+project_checkpoints/
+debug_checkpoints/
+playground/
 ckpts*
 
-.ipynb_checkpoints
-chunyl_scripts
-
-# DevContainer
+# Keep important config files
+!**/alpaca-data-conversation.json
 !.devcontainer/*
 
-# Demo
+# Demo and scripts
 serve_images/
-notebooks/
-logs
-scripts/dist_*
-logs/
 submissions/
-cn_scripts/
-internal_project_checkpoints/
-work_dirs
-scripts/i18n/*
-playground/.nfs028b000000010add00000001
-HIP
-playground/.nfs028b0000017bff2c00000012
-scripts/qwen
-scripts/vicuna
-scripts/mistral
-scripts/baseline_rep
-scripts/cn_boli01_hl
-scripts/cn_boli01_lf
-scripts/cn_lf
-scripts/cn_lq
-scripts/cn_yg
-scripts/cn_yg_hao
-scripts/eva_encoder
-scripts/i18n
-scripts/i18n_higher_res
-scripts/multi-images
-scratchpad
-build/
-playground/*.json
+work_dirs/
+scratchpad/
 mlx_configs/
 data_processing/
-# demo/

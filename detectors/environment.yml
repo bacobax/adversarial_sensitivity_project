@@ -1,7 +1,6 @@
 name: deepfake-detectors
 channels:
   - pytorch
-  - nvidia
   - defaults
 
 dependencies:
@@ -9,7 +8,6 @@ dependencies:
 
   - pytorch
   - torchvision
-  - pytorch-cuda=12.4
   - pandas
   - scikit-image
   - scikit-learn

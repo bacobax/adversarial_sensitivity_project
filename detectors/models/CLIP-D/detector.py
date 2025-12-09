@@ -1,15 +1,12 @@
 import os
-import sys
 from typing import Optional
 
 import torch
 
-DETECTOR_DIR = os.path.dirname(os.path.abspath(__file__))
-if DETECTOR_DIR in sys.path:
-    sys.path.remove(DETECTOR_DIR)
-sys.path.insert(0, DETECTOR_DIR)
-from networks.utils import create_architecture
+from .networks.utils import create_architecture
 from support.base_detector import BaseDetector
+
+DETECTOR_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class CLIPDDetector(BaseDetector):
