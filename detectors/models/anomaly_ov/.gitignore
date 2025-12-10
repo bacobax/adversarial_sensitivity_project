@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Model weights (large files)
+*.pt
+*.pth
+weights/
+
+# Logs and outputs
+*.log
+*.log.*
+outputs/
+logs/
+
+# Data (large datasets)
+finetune_dataset/
+trends_cv_data/
+data/
+
+# Cache
+cache/
+.cache/
+
+# Editor
+.idea/
+*.swp
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Wandb
+wandb/
+
+# Project specific
+checkpoints/
+project_checkpoints/
+debug_checkpoints/
+playground/
+ckpts*
+
+# Keep important config files
+!**/alpaca-data-conversation.json
+!.devcontainer/*
+
+# Demo and scripts
+serve_images/
+submissions/
+work_dirs/
+scratchpad/
+mlx_configs/
+data_processing/
