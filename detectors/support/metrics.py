@@ -142,7 +142,17 @@ def compute_mask_anomaly_metrics(
         return to_01(arr).astype(np.float32)
     
     def compute_otsu_threshold(mv01: np.ndarray) -> float:
-        """Compute Otsu threshold on a [0, 1] image."""
+        """Compute Otsu threshold on a [0, 1] image.
+        
+        For binary masks (only 0 and 1 values), returns 0.5 to avoid
+        Otsu returning 0.0 which would make all pixels positive.
+        """
+        # Check if mask is already binary (only contains ~0 and ~1 values)
+        unique_vals = np.unique(mv01)
+        if len(unique_vals) <= 2:
+            # Binary mask - use fixed threshold at 0.5
+            return 0.5
+        
         thr_val, _ = cv2.threshold(
             (mv01 * 255.0).astype(np.uint8), 
             0, 255, 
@@ -292,7 +302,9 @@ class MetricsAggregator:
         """Save all records to CSV file."""
         import pandas as pd
         df = pd.DataFrame(self.records)
-        df.to_csv(path, index=False)
+        # Keep NaN as is (pandas will write them as empty strings in CSV)
+        # But we can also write them explicitly if preferred
+        df.to_csv(path, index=False, na_rep='NaN')  # Use 'NaN' representation for clarity
         return df
     
     def summary_str(self) -> str:

@@ -39,6 +39,11 @@ class AnomalyOVDetector(BaseDetector):
     
     name = 'AnomalyOV'
     
+    # Feature flags - this detector supports all features
+    supports_explainability = True
+    supports_vulnerability = True
+    supports_adversarial = True
+    
     def __init__(self, device: Optional[torch.device] = None):
         super().__init__(device)
         self.vision_tower = None
@@ -545,6 +550,37 @@ class AnomalyOVDetector(BaseDetector):
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
                 adv_img.save(f.name)
                 return f.name
+    
+    def generate_adversarial(
+        self,
+        image_path: str,
+        output_path: str,
+        attack_type: str = "fgsm",
+        epsilon: float = 0.05,
+        true_label: int = 1,
+        **kwargs
+    ) -> str:
+        """
+        Alias for generate_adversarial_attack to maintain interface consistency with other detectors.
+        
+        Args:
+            image_path: Path to the input image
+            output_path: Path to save the adversarial image
+            attack_type: Type of attack ('fgsm', 'pgd', 'deepfool', 'random', 'structured')
+            epsilon: Attack strength
+            true_label: True label of the image (0=real, 1=fake). Attack targets opposite class.
+            **kwargs: Additional arguments (ignored)
+            
+        Returns:
+            Path to the saved adversarial image
+        """
+        return self.generate_adversarial_attack(
+            image_path=image_path,
+            attack_type=attack_type,
+            epsilon=epsilon,
+            output_path=output_path,
+            true_label=true_label,
+        )
     
     def _get_or_generate_adversarial(
         self,

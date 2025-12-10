@@ -7,7 +7,7 @@ using GradCAM for vulnerability analysis.
 
 import os
 import sys
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple, Union
 
 import torch
 import numpy as np
@@ -36,6 +36,11 @@ class R50NoDownDetector(BaseDetector):
     """
     
     name = 'R50_nodown'
+    
+    # Feature flags - this detector supports all features
+    supports_explainability = True
+    supports_vulnerability = True
+    supports_adversarial = True
     
     def __init__(self, device: Optional[torch.device] = None):
         super().__init__(device)
@@ -71,25 +76,41 @@ class R50NoDownDetector(BaseDetector):
         out = self.model(image_tensor)
         return float(torch.sigmoid(out).item())
     
-    def predict_with_map(self, image_path: str, map_size: tuple = (512, 512)) -> tuple:
+    # =========================================================================
+    # ABSTRACT METHOD IMPLEMENTATIONS
+    # =========================================================================
+    
+    def _compute_explanation_map(
+        self,
+        image: Union[str, Image.Image],
+        map_size: Optional[Tuple[int, int]] = None,
+        **kwargs
+    ) -> Tuple[float, np.ndarray]:
         """
-        Predict whether an image is fake and return the GradCAM saliency map.
+        Compute GradCAM explanation map for an image.
         
         Args:
-            image_path: Path to the image
-            map_size: Size of the returned map (H, W)
+            image: Input image as path string or PIL Image
+            map_size: Size of the returned map (H, W). Default: (512, 512)
+            **kwargs: Additional arguments (ignored)
             
         Returns:
             tuple: (confidence, gradcam_map)
                 - confidence: float in [0, 1], higher = more likely fake
                 - gradcam_map: np.ndarray of shape (H, W) normalized to [0, 1]
         """
+        if map_size is None:
+            map_size = (self.image_size, self.image_size)
+            
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load() first.")
         if self.cam is None:
             raise RuntimeError("GradCAM not initialized. Install pytorch_grad_cam.")
         
         from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+        
+        # Get image path
+        image_path = self._ensure_image_path(image)
         
         # Load and preprocess image
         img_tensor, rgb_img = load_image(image_path, size=self.image_size)
@@ -107,6 +128,7 @@ class R50NoDownDetector(BaseDetector):
         target_idx = 0 if output.ndim == 1 or output.shape[-1] == 1 else 1
         
         # Generate GradCAM map
+        print(f"generating gradcam for image: {image_path}")
         grayscale_cam = self.cam(input_tensor=img_tensor, targets=[ClassifierOutputTarget(target_idx)])
         cam_map = grayscale_cam[0, :]  # Shape: (H, W)
         
@@ -119,56 +141,88 @@ class R50NoDownDetector(BaseDetector):
         
         return confidence, cam_map
     
-    def predict_with_vulnerability(
+    def _compute_vulnerability_map(
         self, 
-        image, 
-        device="cpu", 
-        map_size: tuple = (512, 512),
+        image: Union[str, Image.Image],
+        attack_type: str = "fgsm",
+        epsilon: float = 0.03,
+        map_size: Optional[Tuple[int, int]] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Predict and compute vulnerability information using GradCAM.
+        Compute vulnerability map by comparing GradCAM before/after attack.
         
         Args:
             image: Input image (PIL Image or path string)
-            device: Device for computation (overridden by self.device)
-            map_size: Size of output maps
-            **kwargs: Additional arguments (ignored)
+            attack_type: Type of adversarial attack
+            epsilon: Attack strength
+            map_size: Size of output maps. Default: (512, 512)
+            **kwargs: Additional arguments (e.g., true_label)
         
         Returns:
             dict with keys:
-                - 'prediction': float, the model's prediction score
-                - 'input_tensor': torch.Tensor, the preprocessed input
-                - 'anomaly_map': np.ndarray, the GradCAM saliency map
+                - 'prediction': float, original prediction score
+                - 'prediction_attacked': float, prediction after attack
+                - 'explanation_map': np.ndarray, original GradCAM map
+                - 'explanation_map_attacked': np.ndarray, GradCAM after attack
+                - 'vulnerability_map': np.ndarray, |original - attacked|
+                - 'input_tensor': torch.Tensor, preprocessed input
+                - 'anomaly_map': np.ndarray (legacy alias for explanation_map)
         """
+        if map_size is None:
+            map_size = (self.image_size, self.image_size)
+            
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load() first.")
         
-        # Convert path to string if needed
-        if isinstance(image, str):
-            image_path = image
-        elif hasattr(image, 'filename'):
-            image_path = image.filename
-        else:
-            # Save PIL image to temp file
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
-                image.save(f.name)
-                image_path = f.name
+        # Get image path
+        image_path = self._ensure_image_path(image)
         
-        confidence, cam_map = self.predict_with_map(image_path, map_size=map_size)
+        # Get original prediction and explanation map
+        confidence, cam_map = self._compute_explanation_map(image_path, map_size=map_size)
+        
+        # Generate adversarial image
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+            adv_path = f.name
+        
+        true_label = kwargs.get('true_label', 1)
+        self._generate_adversarial_image(
+            image_path=image_path,
+            output_path=adv_path,
+            attack_type=attack_type,
+            epsilon=epsilon,
+            true_label=true_label
+        )
+        
+        # Get attacked prediction and explanation map
+        confidence_attacked, cam_map_attacked = self._compute_explanation_map(adv_path, map_size=map_size)
+        
+        # Compute vulnerability map
+        vulnerability_map = np.abs(cam_map - cam_map_attacked)
         
         # Load tensor for return
         img_tensor, _ = load_image(image_path, size=self.image_size)
         img_tensor = img_tensor.to(self.device)
         
+        # Clean up temp file
+        try:
+            os.unlink(adv_path)
+        except:
+            pass
+        
         return {
             'prediction': confidence,
+            'prediction_attacked': confidence_attacked,
+            'explanation_map': cam_map,
+            'explanation_map_attacked': cam_map_attacked,
+            'vulnerability_map': vulnerability_map,
             'input_tensor': img_tensor.unsqueeze(0),
+            # Legacy alias
             'anomaly_map': cam_map,
         }
     
-    def generate_adversarial(
+    def _generate_adversarial_image(
         self,
         image_path: str,
         output_path: str,
@@ -252,46 +306,86 @@ class R50NoDownDetector(BaseDetector):
         
         return output_path
     
-    def _get_or_generate_adversarial(
-        self,
-        benign_path: str,
-        adv_path: Optional[str],
-        expected_path: Optional[str],
-        attack_type: str,
-        epsilon: float = 0.03,
-        true_label: int = 1,
-    ) -> tuple:
+    # =========================================================================
+    # PUBLIC API - Wrappers around abstract methods (for backward compatibility)
+    # =========================================================================
+    
+    def predict_with_map(self, image_path: str, map_size: tuple = (512, 512)) -> tuple:
         """
-        Get existing adversarial image or generate if not found.
+        Predict whether an image is fake and return the GradCAM saliency map.
+        
+        This is the public API that wraps _compute_explanation_map.
         
         Args:
-            benign_path: Path to benign image
-            adv_path: Path to existing adversarial image (may be None)
-            expected_path: Path where to save generated adversarial image
-            attack_type: Type of attack
-            epsilon: Attack strength
-            true_label: True label (0=real, 1=fake). Attack targets opposite class.
+            image_path: Path to the image
+            map_size: Size of the returned map (H, W)
+            
+        Returns:
+            tuple: (confidence, gradcam_map)
+        """
+        return self._compute_explanation_map(image_path, map_size=map_size)
+    
+    def predict_with_vulnerability(
+        self, 
+        image: Union[str, Image.Image],
+        device: str = "cpu",
+        map_size: tuple = (512, 512),
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Predict and compute vulnerability information using GradCAM.
+        
+        This is the public API that wraps _compute_vulnerability_map.
+        For backward compatibility, also accepts 'device' parameter (ignored).
+        
+        Args:
+            image: Input image (PIL Image or path string)
+            device: Device for computation (ignored, uses self.device)
+            map_size: Size of output maps
+            **kwargs: Additional arguments
         
         Returns:
-            tuple: (adv_image_path, was_generated)
+            dict with prediction and map information
         """
-        # If adversarial image exists, use it
-        if adv_path is not None and os.path.exists(adv_path):
-            return adv_path, False
+        return self._compute_vulnerability_map(image, map_size=map_size, **kwargs)
+    
+    def generate_adversarial(
+        self,
+        image_path: str,
+        output_path: str,
+        attack_type: str = "pgd",
+        epsilon: float = 0.03,
+        true_label: int = 1,
+        **kwargs
+    ) -> str:
+        """
+        Generate adversarial image using the specified attack type.
         
-        # Generate adversarial image
-        if expected_path is None:
-            raise ValueError("No adversarial path and no expected path provided")
+        This is the public API that wraps _generate_adversarial_image.
         
-        self.generate_adversarial(
-            image_path=benign_path,
-            output_path=expected_path,
+        Args:
+            image_path: Path to the original image
+            output_path: Path to save the adversarial image
+            attack_type: Type of attack ('pgd', 'fgsm', 'deepfool')
+            epsilon: Attack strength
+            true_label: True label (0=real, 1=fake). Attack targets opposite class.
+            **kwargs: Additional attack parameters
+        
+        Returns:
+            Path to the saved adversarial image
+        """
+        return self._generate_adversarial_image(
+            image_path=image_path,
+            output_path=output_path,
             attack_type=attack_type,
             epsilon=epsilon,
             true_label=true_label,
+            **kwargs
         )
-        
-        return expected_path, True
+    
+    # =========================================================================
+    # VISUALIZATION
+    # =========================================================================
     
     def visualize_vulnerability_grid(
         self,
@@ -301,6 +395,7 @@ class R50NoDownDetector(BaseDetector):
         dpi: int = 150,
         overlay_alpha: float = 0.4,
         epsilon: float = 0.03,
+        map_cache: Optional[Dict[str, Tuple[float, np.ndarray]]] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -373,15 +468,25 @@ class R50NoDownDetector(BaseDetector):
         if bbox_np is None:
             bbox_np = np.zeros((512, 512))
         
-        # Get predictions and GradCAM maps for benign images
-        pred_real, cam_real = self.predict_with_map(image_set.real)
-        pred_samecat, cam_samecat = self.predict_with_map(image_set.samecat)
-        pred_diffcat, cam_diffcat = self.predict_with_map(image_set.diffcat)
+        # Helper function to get map from cache or compute
+        def get_map_cached(image_path: str) -> Tuple[float, np.ndarray]:
+            """Get map from cache or compute if not cached."""
+            if map_cache is not None and image_path in map_cache:
+                return map_cache[image_path]
+            pred, cam = self.predict_with_map(image_path)
+            if map_cache is not None:
+                map_cache[image_path] = (pred, cam)
+            return pred, cam
         
-        # Get predictions and GradCAM maps for adversarial images
-        pred_real_adv, cam_real_adv = self.predict_with_map(real_adv_path)
-        pred_samecat_adv, cam_samecat_adv = self.predict_with_map(samecat_adv_path)
-        pred_diffcat_adv, cam_diffcat_adv = self.predict_with_map(diffcat_adv_path)
+        # Get predictions and GradCAM maps for benign images (using cache if available)
+        pred_real, cam_real = get_map_cached(image_set.real)
+        pred_samecat, cam_samecat = get_map_cached(image_set.samecat)
+        pred_diffcat, cam_diffcat = get_map_cached(image_set.diffcat)
+        
+        # Get predictions and GradCAM maps for adversarial images (using cache if available)
+        pred_real_adv, cam_real_adv = get_map_cached(real_adv_path)
+        pred_samecat_adv, cam_samecat_adv = get_map_cached(samecat_adv_path)
+        pred_diffcat_adv, cam_diffcat_adv = get_map_cached(diffcat_adv_path)
         
         # Compute vulnerability maps (|original - attacked|)
         vuln_real = np.abs(cam_real - cam_real_adv)
@@ -495,6 +600,10 @@ class R50NoDownDetector(BaseDetector):
         
         return {'generated_adversarial': generated_any}
     
+    # =========================================================================
+    # HELPER METHODS
+    # =========================================================================
+    
     @staticmethod
     def _resize_map(map_np: np.ndarray, target_size: tuple) -> np.ndarray:
         """Resize a map to target size (H, W)."""
@@ -505,17 +614,6 @@ class R50NoDownDetector(BaseDetector):
         map_img = PILImage.fromarray((map_np * 255).astype(np.uint8), mode='L')
         map_img = map_img.resize((target_size[1], target_size[0]), PILImage.BILINEAR)
         return np.array(map_img).astype(np.float32) / 255.0
-    
-    @staticmethod
-    def _load_mask(mask_path: str) -> Optional[np.ndarray]:
-        """Load a mask image and convert to grayscale numpy array."""
-        try:
-            mask = Image.open(mask_path).convert('L')
-            mask_np = np.array(mask).astype(np.float32) / 255.0
-            return mask_np
-        except Exception as e:
-            print(f"Warning: Failed to load mask {mask_path}: {e}")
-            return None
 
 
 class _R50NoDownAttackWrapper(torch.nn.Module):
