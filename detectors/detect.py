@@ -38,6 +38,16 @@ def _detector_class_by_name(name: str):
 
 
 def parse_weights_map(weights: Optional[str]) -> Dict[str, Optional[str]]:
+    """
+    Parse a weights mapping from command-line arguments.
+    
+    Input format: List of strings where each string can be:
+        - "model_name:checkpoint_path" (model paired with checkpoint)
+        - "model_name" (model with no checkpoint)
+    
+    Output format: Dictionary with model names as keys and checkpoint paths (or None) as values.
+        Example: {"CLIP-D": "/path/to/checkpoint", "NPR": None}
+    """
     mapping: Dict[str, Optional[str]] = {}
     if not weights:
         return mapping
