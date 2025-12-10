@@ -441,104 +441,274 @@ class AnomalyOVDetector(BaseDetector):
             vuln_metrics=vuln_metrics,
         )
     
+    def generate_adversarial_attack(
+        self, 
+        image_path: str, 
+        attack_type: str, 
+        epsilon: float = 0.05,
+        output_path: Optional[str] = None,
+        true_label: int = 1,
+    ) -> str:
+        """
+        Generate an adversarial attack for a given image and save it.
+        
+        Uses the adversarial_recompute function from vulnerability_map module
+        which applies top-k masked attacks based on anomaly maps.
+        
+        Args:
+            image_path: Path to the input image
+            attack_type: Type of attack ('fgsm', 'pgd', 'deepfool', 'random', 'structured')
+            epsilon: Attack strength
+            output_path: Path to save the adversarial image
+            true_label: True label of the image (0=real, 1=fake). Attack targets opposite class.
+            
+        Returns:
+            Path to the saved adversarial image
+        """
+        from src.utils.vulnerability_map import adversarial_recompute
+        
+        if self.vision_tower is None or self.anomaly_expert is None:
+            raise RuntimeError("Model not loaded. Call load() first.")
+        
+        # Load original image to get its size
+        img = Image.open(image_path).convert('RGB')
+        original_size = img.size  # (W, H)
+        
+        # Preprocess image
+        processed = self.image_processor.preprocess([img], return_tensors='pt')
+        pixel_values = processed['pixel_values'][0]
+        
+        if not isinstance(pixel_values, torch.Tensor):
+            pixel_values = torch.tensor(pixel_values)
+        
+        # Shape: [1, V, 3, H, W] where V=1 (single view)
+        pixel_values = pixel_values.unsqueeze(0).unsqueeze(0).to(self.device, dtype=self._dtype)
+        
+        # Create model wrapper for vulnerability_map functions
+        model_wrapper = _AnomalyOVWrapper(
+            vision_tower=self.vision_tower,
+            anomaly_expert=self.anomaly_expert,
+            dtype=self._dtype,
+            device=self.device
+        )
+        
+        # Get original anomaly map first
+        with torch.no_grad():
+            image_features, image_level_features = self.vision_tower(
+                pixel_values.squeeze(0).squeeze(0).unsqueeze(0)  # [1, 3, H, W]
+            )
+            split_sizes = [image_features.shape[0]]
+            _, _, _, anomaly_map_orig = self.anomaly_expert(
+                image_features,
+                image_level_features,
+                split_sizes,
+                return_anomaly_map=True,
+                anomaly_map_size=(384, 384)  # SigLip native resolution
+            )
+        
+        # Generate adversarial image using adversarial_recompute
+        # Pass true_label so the attack targets the opposite class
+        x_adv, _, _, _ = adversarial_recompute(
+            model=model_wrapper,
+            image_tensor=pixel_values,
+            original_anomaly_maps=anomaly_map_orig,
+            device=str(self.device),
+            epsilon=epsilon,
+            top_k=0.5,
+            noise_mode=attack_type,  # 'fgsm', 'pgd', 'deepfool', 'random', 'structured'
+            true_label=true_label,
+        )
+        
+        # Convert adversarial tensor back to image
+        # x_adv shape: [1, V, 3, H, W] -> [3, H, W]
+        x_adv_np = x_adv.squeeze(0).squeeze(0).cpu().float().numpy()
+        
+        # Denormalize from model's normalization to [0, 255]
+        # SigLip typically normalizes to approximately [-1, 1] or [0, 1]
+        x_adv_np = np.clip(x_adv_np, -1, 1)
+        x_adv_np = ((x_adv_np + 1) / 2 * 255).astype(np.uint8)  # Assuming [-1, 1] normalization
+        x_adv_np = np.transpose(x_adv_np, (1, 2, 0))  # CHW -> HWC
+        
+        # Create adversarial image and resize back to original size
+        adv_img = Image.fromarray(x_adv_np)
+        if adv_img.size != original_size:
+            adv_img = adv_img.resize(original_size, Image.BILINEAR)
+        
+        if output_path:
+            os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+            adv_img.save(output_path)
+            print(f"[AnomalyOV] Generated {attack_type} adversarial image (label={true_label}): {output_path}")
+            return output_path
+        else:
+            # Save to a temp location and return path
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+                adv_img.save(f.name)
+                return f.name
+    
+    def _get_or_generate_adversarial(
+        self,
+        benign_path: str,
+        existing_adv_path: Optional[str],
+        expected_adv_path: Optional[str],
+        attack_type: str,
+        epsilon: float,
+        true_label: int = 1,
+    ) -> tuple:
+        """
+        Get or generate an adversarial image.
+        
+        Args:
+            benign_path: Path to the benign image
+            existing_adv_path: Path to existing adversarial (may be None or not exist)
+            expected_adv_path: Where to save generated adversarial if needed
+            attack_type: Type of attack
+            epsilon: Attack strength
+            true_label: True label (0=real, 1=fake). Attack targets opposite class.
+            
+        Returns:
+            Tuple of (adversarial_path, was_generated)
+        """
+        # First try existing adversarial
+        if existing_adv_path and os.path.exists(existing_adv_path):
+            return existing_adv_path, False
+        
+        # Try finding with different extensions
+        if existing_adv_path:
+            found = self._find_file_with_extensions(existing_adv_path)
+            if found:
+                return found, False
+        
+        # Need to generate - determine output path
+        if expected_adv_path:
+            output_path = expected_adv_path
+        else:
+            # Fallback: save next to benign image with attack suffix
+            base, ext = os.path.splitext(benign_path)
+            output_path = f"{base}_{attack_type}_adv.png"
+        
+        # Generate the adversarial image with correct label
+        self.generate_adversarial_attack(
+            image_path=benign_path,
+            attack_type=attack_type,
+            epsilon=epsilon,
+            output_path=output_path,
+            true_label=true_label,
+        )
+        
+        return output_path, True
+    
     def visualize_vulnerability_grid(
         self,
-        filename: str,
-        data_folder: str,
+        image_set,
         output_path: str,
-        device="cpu",
+        attack_type: str = "pgd",
         dpi: int = 150,
         overlay_alpha: float = 0.4,
+        epsilon: float = 0.05,
         **kwargs
-    ) -> None:
+    ) -> Dict[str, Any]:
         """
-        Visualize vulnerability analysis in a grid format for the new dataset structure.
+        Visualize vulnerability analysis in a grid format.
         
-        Dataset structure expected under data_folder:
-        - original/: Original unmodified images
-        - samecat/: Inpainted images with same category
-        - diffcat/: Inpainted images with different category  
-        - masks/: Inpainting masks for samecat (b&w)
-        - bboxs/: Inpainting bboxes for diffcat (b&w)
+        If adversarial images don't exist, they will be generated on-the-fly
+        and saved to the expected paths in the image_set.
+        
+        Dataset structure (ImageSet contains paths for):
+        - real, samecat, diffcat: Benign images
+        - real_adv, samecat_adv, diffcat_adv: Pre-computed adversarial images (may be None)
+        - real_adv_expected, samecat_adv_expected, diffcat_adv_expected: Where to save generated images
+        - mask, bbox: Inpainting masks/bboxes
         
         Grid layout (5 rows x 3 columns):
-        Columns: C1=Original, C2=Samecat, C3=Diffcat
+        Columns: C1=Real, C2=Samecat, C3=Diffcat
         Rows:
           R1: Original image
-          R2: Original image with mask overlay
-          R3: Attacked image with mask overlay
-          R4: Original image with vulnerability map (mask subtraction) overlay
+          R2: Original image with anomaly map overlay
+          R3: Attacked image with anomaly map overlay
+          R4: Original image with vulnerability map (|orig_am - attacked_am|) overlay
           R5: Mask/BBox image
         
         Args:
-            filename: The filename (without folder path) to process
-            data_folder: Parent folder containing original/, samecat/, diffcat/, masks/, bboxs/
+            image_set: ImageSet dataclass containing all image paths
             output_path: Path to save the visualization
-            device: Device for computation
+            attack_type: Name of the attack type (for labeling and generation)
             dpi: DPI for saved image
-            overlay_alpha: Alpha for mask/map overlays
-            **kwargs: Additional arguments passed to predict_with_vulnerability
+            overlay_alpha: Alpha for map overlays
+            epsilon: Attack strength for adversarial generation
+            **kwargs: Additional arguments (ignored)
+        
+        Returns:
+            dict with 'generated_adversarial': True if any adversarial images were generated
         """
-        # Build paths for all images
-        original_path = os.path.join(data_folder, 'original', filename)
-        samecat_path = os.path.join(data_folder, 'samecat', filename)
-        diffcat_path = os.path.join(data_folder, 'diffcat', filename)
-        mask_path = os.path.join(data_folder, 'masks', filename)
-        bbox_path = os.path.join(data_folder, 'bboxs', filename)
+        generated_any = False
         
-        # Try different extensions for mask/bbox if exact filename doesn't exist
-        mask_path = self._find_file_with_extensions(mask_path)
-        bbox_path = self._find_file_with_extensions(bbox_path)
-        
-        # Verify required files exist
-        missing = []
-        if not os.path.exists(original_path):
-            missing.append(f"original/{filename}")
-        if not os.path.exists(samecat_path):
-            missing.append(f"samecat/{filename}")
-        if not os.path.exists(diffcat_path):
-            missing.append(f"diffcat/{filename}")
-        if mask_path is None:
-            missing.append(f"masks/{filename}")
-        if bbox_path is None:
-            missing.append(f"bboxs/{filename}")
-        
-        if missing:
-            raise FileNotFoundError(f"Missing files in {data_folder}: {missing}")
+        # Get or generate adversarial images
+        # real images have true_label=0, fake images (samecat/diffcat) have true_label=1
+        real_adv_path, gen1 = self._get_or_generate_adversarial(
+            image_set.real, image_set.real_adv, 
+            getattr(image_set, 'real_adv_expected', None),
+            attack_type, epsilon,
+            true_label=0,  # Real image
+        )
+        samecat_adv_path, gen2 = self._get_or_generate_adversarial(
+            image_set.samecat, image_set.samecat_adv,
+            getattr(image_set, 'samecat_adv_expected', None),
+            attack_type, epsilon,
+            true_label=1,  # Fake image (inpainted)
+        )
+        diffcat_adv_path, gen3 = self._get_or_generate_adversarial(
+            image_set.diffcat, image_set.diffcat_adv,
+            getattr(image_set, 'diffcat_adv_expected', None),
+            attack_type, epsilon,
+            true_label=1,  # Fake image (inpainted)
+        )
+        generated_any = gen1 or gen2 or gen3
         
         # Load all images
-        img_original = Image.open(original_path).convert('RGB')
-        img_samecat = Image.open(samecat_path).convert('RGB')
-        img_diffcat = Image.open(diffcat_path).convert('RGB')
-        mask_np = self._load_mask(mask_path)
-        bbox_np = self._load_mask(bbox_path)
+        img_real = Image.open(image_set.real).convert('RGB')
+        img_samecat = Image.open(image_set.samecat).convert('RGB')
+        img_diffcat = Image.open(image_set.diffcat).convert('RGB')
         
-        # For original image, create an all-black mask (no inpainting)
-        black_mask_np = np.zeros_like(mask_np)
+        img_real_adv = Image.open(real_adv_path).convert('RGB')
+        img_samecat_adv = Image.open(samecat_adv_path).convert('RGB')
+        img_diffcat_adv = Image.open(diffcat_adv_path).convert('RGB')
         
-        # Get vulnerability data for each image type
-        result_original = self.predict_with_vulnerability(original_path, device=device, **kwargs)
-        result_samecat = self.predict_with_vulnerability(samecat_path, device=device, **kwargs)
-        result_diffcat = self.predict_with_vulnerability(diffcat_path, device=device, **kwargs)
+        mask_np = self._load_mask(image_set.mask)
+        bbox_np = self._load_mask(image_set.bbox)
         
-        # Extract anomaly maps and vulnerability maps
-        am_original = self._map_to_numpy(result_original['anomaly_map'])
-        am_original_attacked = self._map_to_numpy(result_original['anomaly_map_attacked'])
-        vuln_original = self._map_to_numpy(result_original['vulnerability_map'])
+        # For real image, create an all-black mask (no inpainting)
+        black_mask_np = np.zeros_like(mask_np) if mask_np is not None else np.zeros((224, 224))
         
-        am_samecat = self._map_to_numpy(result_samecat['anomaly_map'])
-        am_samecat_attacked = self._map_to_numpy(result_samecat['anomaly_map_attacked'])
-        vuln_samecat = self._map_to_numpy(result_samecat['vulnerability_map'])
+        # Get anomaly maps for benign images
+        pred_real, am_real = self.predict_with_map(image_set.real)
+        pred_samecat, am_samecat = self.predict_with_map(image_set.samecat)
+        pred_diffcat, am_diffcat = self.predict_with_map(image_set.diffcat)
         
-        am_diffcat = self._map_to_numpy(result_diffcat['anomaly_map'])
-        am_diffcat_attacked = self._map_to_numpy(result_diffcat['anomaly_map_attacked'])
-        vuln_diffcat = self._map_to_numpy(result_diffcat['vulnerability_map'])
+        # Get anomaly maps for adversarial images
+        pred_real_adv, am_real_adv = self.predict_with_map(real_adv_path)
+        pred_samecat_adv, am_samecat_adv = self.predict_with_map(samecat_adv_path)
+        pred_diffcat_adv, am_diffcat_adv = self.predict_with_map(diffcat_adv_path)
+        
+        # Convert to numpy
+        am_real_np = self._map_to_numpy(am_real)
+        am_samecat_np = self._map_to_numpy(am_samecat)
+        am_diffcat_np = self._map_to_numpy(am_diffcat)
+        
+        am_real_adv_np = self._map_to_numpy(am_real_adv)
+        am_samecat_adv_np = self._map_to_numpy(am_samecat_adv)
+        am_diffcat_adv_np = self._map_to_numpy(am_diffcat_adv)
+        
+        # Compute vulnerability maps (|original - attacked|)
+        vuln_real_np = np.abs(am_real_np - am_real_adv_np)
+        vuln_samecat_np = np.abs(am_samecat_np - am_samecat_adv_np)
+        vuln_diffcat_np = np.abs(am_diffcat_np - am_diffcat_adv_np)
         
         # Create figure with 5 rows x 3 columns
         fig, axes = plt.subplots(5, 3, figsize=(12, 20))
         
         # Column titles
-        col_titles = ['Original (C1)', 'Samecat (C2)', 'Diffcat (C3)']
+        col_titles = ['Real (C1)', 'Samecat (C2)', 'Diffcat (C3)']
         row_titles = [
             'R1: Image',
             'R2: Image + Anomaly Map',
@@ -550,47 +720,55 @@ class AnomalyOVDetector(BaseDetector):
         # Data for each column
         columns_data = [
             {
-                'image': img_original,
+                'image': img_real,
+                'image_adv': img_real_adv,
                 'mask': black_mask_np,
-                'am': am_original,
-                'am_attacked': am_original_attacked,
-                'vuln': vuln_original,
-                'prediction': result_original['prediction'],
+                'am': am_real_np,
+                'am_adv': am_real_adv_np,
+                'vuln': vuln_real_np,
+                'pred': pred_real,
+                'pred_adv': pred_real_adv,
             },
             {
                 'image': img_samecat,
+                'image_adv': img_samecat_adv,
                 'mask': mask_np,
-                'am': am_samecat,
-                'am_attacked': am_samecat_attacked,
-                'vuln': vuln_samecat,
-                'prediction': result_samecat['prediction'],
+                'am': am_samecat_np,
+                'am_adv': am_samecat_adv_np,
+                'vuln': vuln_samecat_np,
+                'pred': pred_samecat,
+                'pred_adv': pred_samecat_adv,
             },
             {
                 'image': img_diffcat,
+                'image_adv': img_diffcat_adv,
                 'mask': bbox_np,
-                'am': am_diffcat,
-                'am_attacked': am_diffcat_attacked,
-                'vuln': vuln_diffcat,
-                'prediction': result_diffcat['prediction'],
+                'am': am_diffcat_np,
+                'am_adv': am_diffcat_adv_np,
+                'vuln': vuln_diffcat_np,
+                'pred': pred_diffcat,
+                'pred_adv': pred_diffcat_adv,
             },
         ]
         
         for col_idx, col_data in enumerate(columns_data):
             img = col_data['image']
+            img_adv = col_data['image_adv']
             mask = col_data['mask']
             am = col_data['am']
-            am_attacked = col_data['am_attacked']
+            am_adv = col_data['am_adv']
             vuln = col_data['vuln']
-            pred = col_data['prediction']
+            pred = col_data['pred']
+            pred_adv = col_data['pred_adv']
             
             # Resize maps to match image size if needed
             img_size = (img.size[1], img.size[0])  # (H, W)
             am_resized = self._resize_map(am, img_size)
-            am_attacked_resized = self._resize_map(am_attacked, img_size)
+            am_adv_resized = self._resize_map(am_adv, img_size)
             vuln_resized = self._resize_map(vuln, img_size)
-            mask_resized = self._resize_map(mask, img_size)
+            mask_resized = self._resize_map(mask, img_size) if mask is not None else np.zeros(img_size)
             
-            # R1: Original image
+            # R1: Original image with prediction
             axes[0, col_idx].imshow(img)
             pred_label = 'FAKE' if pred > 0.5 else 'REAL'
             axes[0, col_idx].set_title(f'{col_titles[col_idx]}\nPred: {pred_label} ({pred:.3f})', fontsize=10)
@@ -602,8 +780,10 @@ class AnomalyOVDetector(BaseDetector):
             axes[1, col_idx].axis('off')
             
             # R3: Attacked image with anomaly map overlay
-            axes[2, col_idx].imshow(img)
-            axes[2, col_idx].imshow(am_attacked_resized, cmap='hot', alpha=overlay_alpha, vmin=0, vmax=1)
+            pred_adv_label = 'FAKE' if pred_adv > 0.5 else 'REAL'
+            axes[2, col_idx].imshow(img_adv)
+            axes[2, col_idx].imshow(am_adv_resized, cmap='hot', alpha=overlay_alpha, vmin=0, vmax=1)
+            axes[2, col_idx].set_title(f'{attack_type.upper()}\nPred: {pred_adv_label} ({pred_adv:.3f})', fontsize=9)
             axes[2, col_idx].axis('off')
             
             # R4: Original image with vulnerability map overlay
@@ -619,6 +799,7 @@ class AnomalyOVDetector(BaseDetector):
         for row_idx, row_title in enumerate(row_titles):
             axes[row_idx, 0].set_ylabel(row_title, fontsize=10, rotation=0, ha='right', va='center')
         
+        plt.suptitle(f'Vulnerability Analysis - {image_set.filename} ({attack_type})', fontsize=12, y=1.01)
         plt.tight_layout()
         
         # Ensure output directory exists
