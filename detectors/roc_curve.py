@@ -1,34 +1,38 @@
+from itertools import product
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score, roc_curve
 
 # --- Load CSV ---------------------------------------------------------------
-df = pd.read_csv("results.csv")  # adjust path
+# read multiple CSVs
+df = pd.concat([pd.read_csv(f) for f in [
+    "out/results_wr.csv",
+    "out/results_fgsm.csv",
+    "out/results_pgd.csv",
+    "out/results_deepfool.csv",
+    # "out/results_all.csv",
+]])
 
 global_handles = []
 global_labels = []
 
 
 def main():
-    real_mask = df["folder"].str.contains("real", case=False)
-    real_folders = df.loc[real_mask, "folder"].unique()
+    df["category"] = df["folder"].str.split("/").str[-1]
+    df["attack"] = df["folder"].str.split("/").str[-2]
     
-    if len(real_folders) != 1:
-        raise ValueError(f"Expected exactly one 'real' folder, got: {real_folders}")
-    
-    real_folder = real_folders[0]
-    
-    # --- ROC per model ------------------------------------------------------------
     models = df["model"].unique()
+    attacks = df["attack"].unique()
     
     fig, ax = plt.subplots(figsize=(6, 6))
     
-    for model in models:
-        mdf = df[df["model"] == model]
+    for model, attack in product(models, attacks):
+        mdf = df[(df["model"] == model) & (df["attack"] == attack)]
         
         # labels: 0 = real, 1 = everything else
-        y_true = (mdf["folder"] != real_folder).astype(int).to_numpy()
+        y_true = (mdf["category"] != 'real').astype(int).to_numpy()
         y_score = mdf["confidence"].to_numpy()
         
         # need both classes present
@@ -39,7 +43,7 @@ def main():
         fpr, tpr, _ = roc_curve(y_true, y_score)
         auc = roc_auc_score(y_true, y_score)
         
-        ax.plot(fpr, tpr, label=f"{model} (AUC={auc:.3f})", linewidth=1)
+        ax.plot(fpr, tpr, label=f"{model} {attack} (AUC={auc:.3f})", linewidth=1)
     
     # reference diagonal
     ax.plot([0, 1], [0, 1], "--", linewidth=1, color="gray")
@@ -54,7 +58,12 @@ def main():
     
     fig.tight_layout()
     plt.show()
-
+    
+    # plot average confidence across attacks, models and categories
+    fig, ax = plt.subplots(figsize=(6, 6))
+    
+    
+    
 
 if __name__ == "__main__":
     main()

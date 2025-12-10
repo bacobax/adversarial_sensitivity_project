@@ -15,7 +15,7 @@ __pycache__
 *.gz
 *.ckpt
 
-b-free/**/*.png
+datasets/**/*.png
 results*.csv
 weights_dino*
 

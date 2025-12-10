@@ -35,7 +35,7 @@ The dataset used for evaluation is [B-Free](https://github.com/grip-unina/B-Free
 ```bash
 python3.13 detect.py \
     --folders <path/to/folder1> <path/to/folder2> ... \
-    [--models all | CLIP-D NPR P2G R50_nodown R50_TF WaveRep ...] \
+    [--detectors all | CLIP-D NPR P2G R50_nodown R50_TF WaveRep ...] \
     [--weights <model1:/path/to/weights> <model2:/path/to/weights> ...] \
     [--limit 0 | <max images per folder>] \
     [--device cuda:0 | cpu] \

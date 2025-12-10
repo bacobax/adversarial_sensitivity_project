@@ -124,3 +124,23 @@ class BaseDetector:
                                 str(pred_flag),
                             ])
                             f.flush()
+    
+    def supports_explainability(self) -> bool:  # NEW
+        """
+        Return True if this detector implements explain_image(), False otherwise.
+        This lets callers check capability generically.  # NEW
+        """
+        return hasattr(self, "explain_image")  # NEW
+
+    def explain(  # NEW
+        self,
+        batch: torch.Tensor,
+        method: str = "gradcam",
+        class_idx: Optional[int] = None,
+    ):
+        """
+        Explainability API: detectors that support it must override this.  # NEW
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement explain()"
+        )  # NEW

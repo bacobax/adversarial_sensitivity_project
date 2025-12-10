@@ -13,6 +13,9 @@ dependencies:
   - scikit-learn
   - matplotlib
   - tqdm
+  - numpy
+  - pywavelets
+  - pillow
 
   - pip
   - pip:

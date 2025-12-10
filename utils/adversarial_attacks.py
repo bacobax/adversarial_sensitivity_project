@@ -13,6 +13,7 @@ import torchattacks as ta
 ATTACK_REGISTRY: Dict[str, type] = {
     'fgsm': ta.FGSM,
     'pgd': ta.PGD,
+    'deepfool': ta.DeepFool,
 }
 
 
@@ -94,10 +95,32 @@ def pgd_attack(
     )
 
 
+def deepfool_attack(
+    model: nn.Module,
+    images: torch.Tensor,
+    labels: torch.Tensor,
+    steps: int = 50,
+    overshoot: float = 0.02,
+    post_clamp: Optional[Tuple[float, float]] = None,
+    **kwargs,
+) -> torch.Tensor:
+    return run_attack(
+        'deepfool',
+        model,
+        images,
+        labels,
+        steps=steps,
+        overshoot=overshoot,
+        post_clamp=post_clamp,
+        **kwargs,
+    )
+
+
 __all__ = [
     'available_attacks',
     'create_attack',
     'run_attack',
     'fgsm_attack',
     'pgd_attack',
+    'deepfool_attack',
 ]
