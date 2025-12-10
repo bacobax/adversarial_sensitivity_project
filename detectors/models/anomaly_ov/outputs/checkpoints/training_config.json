@@ -1,0 +1,22 @@
+{
+    "vision_tower_name": "google/siglip-so400m-patch14-384",
+    "anomaly_expert_path": "/Users/francescobassignana/Desktop/school/unitn/adversarial_sensitivity_project/anomaly_ov/./pretrained_expert_05b.pth",
+    "batch_size": 2,
+    "num_epochs": 2,
+    "learning_rate": 0.0001,
+    "weight_decay": 1e-05,
+    "image_size": 384,
+    "image_aspect_ratio": "anyres_max_9",
+    "num_grid_pinpoints": 36,
+    "loss_tau": 1.0,
+    "loss_pos_weight": 1.5,
+    "loss_margin": 0.0,
+    "best_epoch": 2,
+    "best_eval_loss": 0.4329828529804945,
+    "test_auc": 0.9224,
+    "dataset_splits": {
+        "train": 600,
+        "eval": 100,
+        "test": 100
+    }
+}
