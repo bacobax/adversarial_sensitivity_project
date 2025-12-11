@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import argparse
 
 # =============================================================================
 # Configuration
@@ -41,9 +42,13 @@ import seaborn as sns
 # Base directory (where this script is located)
 BASE_DIR = Path(__file__).parent.resolve()
 
-# Input and output directories
-ANALYSIS_DIR = BASE_DIR / "analysis"
-OUTPUT_DIR = BASE_DIR / "analysis_results"
+# Default input and output directories
+DEFAULT_ANALYSIS_DIR = BASE_DIR / "analysis"
+DEFAULT_OUTPUT_DIR = BASE_DIR / "analysis_results"
+
+# Module-level directories (will be set in main based on args)
+ANALYSIS_DIR = DEFAULT_ANALYSIS_DIR
+OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 TABLES_DIR = OUTPUT_DIR / "tables"
 CHARTS_DIR = OUTPUT_DIR / "charts"
 EXPLANATION_CHARTS_DIR = CHARTS_DIR / "explanation"
@@ -82,14 +87,21 @@ def create_output_directories() -> None:
 # Data Loading Functions
 # =============================================================================
 
-def discover_analysis_structure(analysis_dir: Path) -> List[Tuple[str, str, Path, Path]]:
+def discover_analysis_structure(analysis_dir: Path) -> Tuple[List[Tuple[str, Path]], List[Tuple[str, str, Path]]]:
     """
-    Walk the analysis directory and discover all model/attack combinations.
+    Walk the analysis directory and discover model/attack structure.
+    
+    New structure:
+      - Explanation CSV: [model]/metrics_explanation.csv (attack-independent)
+      - Vulnerability CSV: [model]/[attack_type]/metrics_vulnerability.csv (per attack)
     
     Returns:
-        List of tuples: (model_name, attack_type, explanation_csv_path, vulnerability_csv_path)
+        Tuple of:
+          - List of tuples: (model_name, explanation_csv_path)
+          - List of tuples: (model_name, attack_type, vulnerability_csv_path)
     """
-    discoveries = []
+    explanation_discoveries = []
+    vulnerability_discoveries = []
     
     if not analysis_dir.exists():
         raise FileNotFoundError(f"Analysis directory not found: {analysis_dir}")
@@ -101,36 +113,38 @@ def discover_analysis_structure(analysis_dir: Path) -> List[Tuple[str, str, Path
         
         model_name = model_dir.name
         
-        # Walk through ATTACK_TYPE directories
+        # Check for explanation CSV at model level (attack-independent)
+        explanation_csv = model_dir / "metrics_explanation.csv"
+        if explanation_csv.exists():
+            explanation_discoveries.append((model_name, explanation_csv))
+        
+        # Walk through ATTACK_TYPE directories for vulnerability CSVs
         for attack_dir in model_dir.iterdir():
             if not attack_dir.is_dir():
                 continue
             
             attack_type = attack_dir.name
             
-            explanation_csv = attack_dir / "metrics_explanation.csv"
             vulnerability_csv = attack_dir / "metrics_vulnerability.csv"
             
-            # Only add if at least one CSV exists
-            if explanation_csv.exists() or vulnerability_csv.exists():
-                discoveries.append((
+            if vulnerability_csv.exists():
+                vulnerability_discoveries.append((
                     model_name,
                     attack_type,
-                    explanation_csv if explanation_csv.exists() else None,
-                    vulnerability_csv if vulnerability_csv.exists() else None
+                    vulnerability_csv
                 ))
     
-    return discoveries
+    return explanation_discoveries, vulnerability_discoveries
 
 
-def load_csv_with_metadata(csv_path: Path, model_name: str, attack_type: str) -> pd.DataFrame:
+def load_csv_with_metadata(csv_path: Path, model_name: str, attack_type: str = None) -> pd.DataFrame:
     """
     Load a CSV file and add model/attack metadata columns.
     
     Args:
         csv_path: Path to the CSV file
         model_name: Name of the model (detector)
-        attack_type: Type of attack
+        attack_type: Type of attack (optional, only for vulnerability CSVs)
     
     Returns:
         DataFrame with added metadata columns
@@ -141,9 +155,10 @@ def load_csv_with_metadata(csv_path: Path, model_name: str, attack_type: str) ->
     try:
         df = pd.read_csv(csv_path)
         df["model"] = model_name
-        # Ensure attack_type column is consistent
-        if "attack_type" not in df.columns:
-            df["attack_type"] = attack_type
+        # Only add attack_type for vulnerability data
+        if attack_type is not None:
+            if "attack_type" not in df.columns:
+                df["attack_type"] = attack_type
         return df
     except Exception as e:
         print(f"  Warning: Could not load {csv_path}: {e}")
@@ -154,30 +169,33 @@ def load_all_data(analysis_dir: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Load all CSV files from the analysis directory into two DataFrames.
     
+    New structure:
+      - Explanation: [model]/metrics_explanation.csv (attack-independent)
+      - Vulnerability: [model]/[attack_type]/metrics_vulnerability.csv
+    
     Returns:
         Tuple of (explanation_df, vulnerability_df)
     """
     print("Loading data from analysis directory...")
     
-    discoveries = discover_analysis_structure(analysis_dir)
+    explanation_discoveries, vulnerability_discoveries = discover_analysis_structure(analysis_dir)
     
     explanation_dfs = []
     vulnerability_dfs = []
     
-    for model_name, attack_type, exp_path, vuln_path in discoveries:
-        print(f"  Loading: {model_name}/{attack_type}")
-        
-        # Load explanation CSV
-        if exp_path:
-            exp_df = load_csv_with_metadata(exp_path, model_name, attack_type)
-            if not exp_df.empty:
-                explanation_dfs.append(exp_df)
-        
-        # Load vulnerability CSV
-        if vuln_path:
-            vuln_df = load_csv_with_metadata(vuln_path, model_name, attack_type)
-            if not vuln_df.empty:
-                vulnerability_dfs.append(vuln_df)
+    # Load explanation CSVs (attack-independent, at model level)
+    for model_name, exp_path in explanation_discoveries:
+        print(f"  Loading explanation: {model_name}")
+        exp_df = load_csv_with_metadata(exp_path, model_name, attack_type=None)
+        if not exp_df.empty:
+            explanation_dfs.append(exp_df)
+    
+    # Load vulnerability CSVs (per attack)
+    for model_name, attack_type, vuln_path in vulnerability_discoveries:
+        print(f"  Loading vulnerability: {model_name}/{attack_type}")
+        vuln_df = load_csv_with_metadata(vuln_path, model_name, attack_type)
+        if not vuln_df.empty:
+            vulnerability_dfs.append(vuln_df)
     
     # Concatenate all DataFrames
     explanation_df = pd.concat(explanation_dfs, ignore_index=True) if explanation_dfs else pd.DataFrame()
@@ -838,13 +856,53 @@ def generate_vulnerability_charts(df: pd.DataFrame, output_dir: Path) -> None:
 
 def main() -> None:
     """Main entry point for the analysis runner."""
+    global ANALYSIS_DIR, OUTPUT_DIR, TABLES_DIR, CHARTS_DIR, EXPLANATION_CHARTS_DIR, VULNERABILITY_CHARTS_DIR
+    
+    parser = argparse.ArgumentParser(
+        description='Analyze metrics from visualize_vulnerability.py output',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        '--input', '-i',
+        type=str,
+        default=str(DEFAULT_ANALYSIS_DIR),
+        help=f'Input analysis directory (default: {DEFAULT_ANALYSIS_DIR})'
+    )
+    parser.add_argument(
+        '--output', '-o',
+        type=str,
+        default=str(DEFAULT_OUTPUT_DIR),
+        help=f'Output directory for results (default: {DEFAULT_OUTPUT_DIR})'
+    )
+    
+    args = parser.parse_args()
+    
+    # Set directories from args
+    ANALYSIS_DIR = Path(args.input)
+    OUTPUT_DIR = Path(args.output)
+    TABLES_DIR = OUTPUT_DIR / "tables"
+    CHARTS_DIR = OUTPUT_DIR / "charts"
+    EXPLANATION_CHARTS_DIR = CHARTS_DIR / "explanation"
+    VULNERABILITY_CHARTS_DIR = CHARTS_DIR / "vulnerability"
+    
     print("=" * 60)
     print("Forgery-Localization Pipeline Analysis Runner")
     print("=" * 60)
+    print(f"Input directory: {ANALYSIS_DIR}")
+    print(f"Output directory: {OUTPUT_DIR}")
     print()
     
     # Step 1: Create output directories
-    create_output_directories()
+    directories = [
+        OUTPUT_DIR,
+        TABLES_DIR,
+        CHARTS_DIR,
+        EXPLANATION_CHARTS_DIR,
+        VULNERABILITY_CHARTS_DIR,
+    ]
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+    print(f"✓ Output directories created at: {OUTPUT_DIR}")
     print()
     
     # Step 2: Load all data
