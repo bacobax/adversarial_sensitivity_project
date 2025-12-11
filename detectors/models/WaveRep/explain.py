@@ -178,7 +178,6 @@ def lime_explain(
         image = image.to(device)
     
     B, C, H, W = image.shape
-    # Compute logits on original batch for return; prefer last logit if multiple present
     
     # Prepare predictor and explainer
     batch_predict = _make_batch_predict_fn(model, device if device is not None else torch.device('cpu'))
