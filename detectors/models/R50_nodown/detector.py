@@ -128,7 +128,7 @@ class R50NoDownDetector(BaseDetector):
         target_idx = 0 if output.ndim == 1 or output.shape[-1] == 1 else 1
         
         # Generate GradCAM map
-        print(f"generating gradcam for image: {image_path}")
+        # print(f"generating gradcam for image: {image_path}")
         grayscale_cam = self.cam(input_tensor=img_tensor, targets=[ClassifierOutputTarget(target_idx)])
         cam_map = grayscale_cam[0, :]  # Shape: (H, W)
         
@@ -302,7 +302,7 @@ class R50NoDownDetector(BaseDetector):
         # Save image
         os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
         adv_img.save(output_path)
-        print(f"[R50_nodown] Generated {attack_type} adversarial image (label={true_label}): {output_path}")
+        # print(f"[R50_nodown] Generated {attack_type} adversarial image (label={true_label}): {output_path}")
         
         return output_path
     

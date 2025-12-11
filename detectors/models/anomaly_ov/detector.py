@@ -303,8 +303,15 @@ class AnomalyOVDetector(BaseDetector):
         if self.vision_tower is None or self.anomaly_expert is None:
             raise RuntimeError("Model not loaded. Call load() first.")
         
-        # Import vulnerability functions
-        from src.utils.vulnerability_map import adversarial_recompute
+        # Import vulnerability functions (use explicit import to avoid path conflicts)
+        import importlib.util
+        vuln_spec = importlib.util.spec_from_file_location(
+            "vulnerability_map",
+            os.path.join(DETECTOR_DIR, "src", "utils", "vulnerability_map.py")
+        )
+        vuln_module = importlib.util.module_from_spec(vuln_spec)
+        vuln_spec.loader.exec_module(vuln_module)
+        adversarial_recompute = vuln_module.adversarial_recompute
         
         # Use self.device if available
         device = self.device if self.device is not None else device
@@ -470,7 +477,15 @@ class AnomalyOVDetector(BaseDetector):
         Returns:
             Path to the saved adversarial image
         """
-        from src.utils.vulnerability_map import adversarial_recompute
+        # Import vulnerability functions (use explicit import to avoid path conflicts)
+        import importlib.util
+        vuln_spec = importlib.util.spec_from_file_location(
+            "vulnerability_map",
+            os.path.join(DETECTOR_DIR, "src", "utils", "vulnerability_map.py")
+        )
+        vuln_module = importlib.util.module_from_spec(vuln_spec)
+        vuln_spec.loader.exec_module(vuln_module)
+        adversarial_recompute = vuln_module.adversarial_recompute
         
         if self.vision_tower is None or self.anomaly_expert is None:
             raise RuntimeError("Model not loaded. Call load() first.")
@@ -542,7 +557,7 @@ class AnomalyOVDetector(BaseDetector):
         if output_path:
             os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
             adv_img.save(output_path)
-            print(f"[AnomalyOV] Generated {attack_type} adversarial image (label={true_label}): {output_path}")
+            # print(f"[AnomalyOV] Generated {attack_type} adversarial image (label={true_label}): {output_path}")
             return output_path
         else:
             # Save to a temp location and return path
@@ -889,8 +904,16 @@ class AnomalyOVDetector(BaseDetector):
     ) -> tuple:
         """Compute metrics between anomaly/vulnerability maps and ground truth mask."""
         try:
-            from src.utils.metrics import compute_mask_anomaly_metrics
-        except ImportError:
+            # Import metrics (use explicit import to avoid path conflicts)
+            import importlib.util
+            metrics_spec = importlib.util.spec_from_file_location(
+                "metrics",
+                os.path.join(DETECTOR_DIR, "src", "utils", "metrics.py")
+            )
+            metrics_module = importlib.util.module_from_spec(metrics_spec)
+            metrics_spec.loader.exec_module(metrics_module)
+            compute_mask_anomaly_metrics = metrics_module.compute_mask_anomaly_metrics
+        except (ImportError, Exception):
             empty = {"iou_topk": float('nan'), "mass_frac": float('nan'), 
                      "roc_auc": float('nan'), "pr_auc": float('nan')}
             return empty, empty
