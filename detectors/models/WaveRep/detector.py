@@ -1,22 +1,22 @@
 import os
-import sys
 from typing import Optional
 
+import numpy as np
+import timm
 import torch
+import torchvision.transforms as transforms
 from torch import nn
 
 from support.base_detector import BaseDetector, prepare_batch
+from support.lime_explain import lime_explain
 
 DETECTOR_DIR = os.path.dirname(os.path.abspath(__file__))
-if DETECTOR_DIR in sys.path:
-    sys.path.remove(DETECTOR_DIR)
-sys.path.insert(0, DETECTOR_DIR)
-
-from utils import create_transform, create_model
 
 
 class WaveRepDetector(BaseDetector):
     name = 'WaveRep'
+    
+    supports_explainability = True
     
     def __init__(self, device: Optional[torch.device] = None):
         super().__init__(device=device)
@@ -40,9 +40,25 @@ class WaveRepDetector(BaseDetector):
         weights = model_id if model_id else self._default_weights()
         if not os.path.exists(weights):
             raise FileNotFoundError(f"WaveRep weights not found: {weights}")
-        self.transform = create_transform(self.cropping)
-        self.model = create_model(weights, self.arc, self.cropping, device)
+        self.transform = self.create_transform(self.cropping)
+        self.model = self.create_model(weights, self.arc, self.cropping, device)
         self.model.eval()
+    
+    @staticmethod
+    def create_model(weights, arc, cropping, device):
+        # create model
+        model = timm.create_model(arc, num_classes=1, pretrained=True, img_size=cropping)
+        model = model.to(device)
+        
+        # load weights
+        # print('loading the model from %s' % weights)
+        dat = torch.load(weights, map_location=device)
+        if 'state_dict' in dat:
+            dat = {k[6:]: dat['state_dict'][k] for k in dat['state_dict'] if k.startswith('model')}
+        model.load_state_dict(dat)
+        del dat
+        
+        return model
     
     def forward(self, images) -> float:
         assert self.model is not None, "Model not loaded"
@@ -58,3 +74,30 @@ class WaveRepDetector(BaseDetector):
             else:
                 logits = self.model(batch)[:, -1]
         return logits.detach().cpu()
+    
+    def explain(
+        self,
+        images: np.ndarray,
+        batch_size: int = 80,
+        num_samples: int = 150,
+    ) -> np.ndarray:
+        """
+        Compute explainability maps for a batch of already-normalized images.
+
+        Args:
+            images: (B, 3, H, W) tensor normalized with ImageNet stats.
+            batch_size: batch size for explainability maps.
+            num_samples: number of samples for explainability maps.
+
+        Returns:
+            cam: (B, 1, H, W) maps in [0, 1].
+            logits: (B, K) raw logits (no sigmoid).
+        """
+    
+        cam = lime_explain(
+            logits_fn=self.forward,
+            images=images,
+            batch_size=batch_size,
+            num_samples=num_samples,
+        )
+        return cam.detach().cpu().numpy()

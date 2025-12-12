@@ -17,10 +17,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 from PIL import Image
+from torchvision import transforms
 from tqdm import tqdm
 
-from .detect_utils import get_device, load_image
-from .lime_explain import lime_explain
+from .detect_utils import get_device
 
 
 class BaseDetector(ABC):
@@ -112,6 +112,15 @@ class BaseDetector(ABC):
         """
         return self.forward(images)
     
+    @staticmethod
+    def create_transform(cropping):
+        t = transforms.Compose([
+            transforms.CenterCrop((cropping, cropping)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        return t
+    
     # =========================================================================
     # OPTIONAL ABSTRACT METHODS - Implement for explainability/vulnerability
     # =========================================================================
@@ -120,7 +129,7 @@ class BaseDetector(ABC):
         self,
         image: Union[str, Image.Image, torch.Tensor],
         map_size: Optional[Tuple[int, int]] = None,
-        **kwargs
+        **kwargs,
     ) -> Tuple[float, np.ndarray]:
         """
         Compute explanation/saliency map for an image.
@@ -145,7 +154,7 @@ class BaseDetector(ABC):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement _compute_explanation_map(). "
             f"Set supports_explainability=True and implement this method to enable "
-            f"explanation map generation."
+            f"explanation map generation.",
         )
     
     def _compute_vulnerability_map(
@@ -154,7 +163,7 @@ class BaseDetector(ABC):
         attack_type: str = "fgsm",
         epsilon: float = 0.03,
         map_size: Optional[Tuple[int, int]] = None,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Compute vulnerability map by comparing explanation before/after attack.
@@ -184,7 +193,7 @@ class BaseDetector(ABC):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement _compute_vulnerability_map(). "
             f"Set supports_vulnerability=True and implement this method to enable "
-            f"vulnerability analysis."
+            f"vulnerability analysis.",
         )
     
     def _generate_adversarial_image(
@@ -194,7 +203,7 @@ class BaseDetector(ABC):
         attack_type: str = "fgsm",
         epsilon: float = 0.03,
         true_label: int = 1,
-        **kwargs
+        **kwargs,
     ) -> str:
         """
         Generate and save an adversarial image.
@@ -219,7 +228,7 @@ class BaseDetector(ABC):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement _generate_adversarial_image(). "
             f"Set supports_adversarial=True and implement this method to enable "
-            f"adversarial image generation."
+            f"adversarial image generation.",
         )
     
     # =========================================================================
@@ -230,7 +239,7 @@ class BaseDetector(ABC):
         self,
         image: Union[str, Image.Image],
         map_size: Optional[Tuple[int, int]] = None,
-        **kwargs
+        **kwargs,
     ) -> Tuple[float, np.ndarray]:
         """
         Predict and return explanation map.
@@ -252,7 +261,7 @@ class BaseDetector(ABC):
         if not self.supports_explainability:
             raise NotImplementedError(
                 f"{self.__class__.__name__} does not support explanation maps. "
-                f"Check detector.supports_explainability before calling this method."
+                f"Check detector.supports_explainability before calling this method.",
             )
         return self._compute_explanation_map(image, map_size=map_size, **kwargs)
     
@@ -261,7 +270,7 @@ class BaseDetector(ABC):
         image: Union[str, Image.Image],
         attack_type: str = "fgsm",
         epsilon: float = 0.03,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Predict and compute vulnerability analysis.
@@ -285,10 +294,10 @@ class BaseDetector(ABC):
         if not self.supports_vulnerability:
             raise NotImplementedError(
                 f"{self.__class__.__name__} does not support vulnerability analysis. "
-                f"Check detector.supports_vulnerability before calling this method."
+                f"Check detector.supports_vulnerability before calling this method.",
             )
         return self._compute_vulnerability_map(
-            image, attack_type=attack_type, epsilon=epsilon, **kwargs
+            image, attack_type=attack_type, epsilon=epsilon, **kwargs,
         )
     
     def generate_adversarial(
@@ -298,7 +307,7 @@ class BaseDetector(ABC):
         attack_type: str = "fgsm",
         epsilon: float = 0.03,
         true_label: int = 1,
-        **kwargs
+        **kwargs,
     ) -> str:
         """
         Generate adversarial image.
@@ -323,7 +332,7 @@ class BaseDetector(ABC):
         if not self.supports_adversarial:
             raise NotImplementedError(
                 f"{self.__class__.__name__} does not support adversarial generation. "
-                f"Check detector.supports_adversarial before calling this method."
+                f"Check detector.supports_adversarial before calling this method.",
             )
         return self._generate_adversarial_image(
             image_path=image_path,
@@ -331,7 +340,7 @@ class BaseDetector(ABC):
             attack_type=attack_type,
             epsilon=epsilon,
             true_label=true_label,
-            **kwargs
+            **kwargs,
         )
     
     # =========================================================================
@@ -344,7 +353,7 @@ class BaseDetector(ABC):
         output_path: str,
         dpi: int = 150,
         mask_path: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> None:
         """
         Visualize vulnerability analysis for a single image.
@@ -364,7 +373,7 @@ class BaseDetector(ABC):
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement visualize_vulnerability(). "
-            f"Override this method in subclasses that support visualization."
+            f"Override this method in subclasses that support visualization.",
         )
     
     def visualize_vulnerability_grid(
@@ -374,7 +383,7 @@ class BaseDetector(ABC):
         attack_type: str = "pgd",
         dpi: int = 150,
         overlay_alpha: float = 0.4,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Visualize vulnerability analysis in a grid format.
@@ -398,7 +407,7 @@ class BaseDetector(ABC):
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} does not implement visualize_vulnerability_grid(). "
-            f"Override this method in subclasses that support grid visualization."
+            f"Override this method in subclasses that support grid visualization.",
         )
     
     # =========================================================================
@@ -615,39 +624,6 @@ class BaseDetector(ABC):
                         #         str(pred_flag),
                         #     ])
                         #     f.flush()
-    
-    def explain(
-        self,
-        batch: np.ndarray,
-        method: str = "lime",
-        class_idx: Optional[int] = None,
-        batch_size: int = 1,
-    ):  # -> Tuple[torch.Tensor, torch.Tensor]
-        """
-        Compute explainability maps for a batch of already-normalized images.
-
-        Args:
-            batch: (B, 3, H, W) tensor normalized with ImageNet stats.
-            method: 'gradcam', 'gradsam' or 'smoothgrad' or 'integrated_gradients'.
-            class_idx: target logit index; if None, use last logit (fake).
-            batch_size: batch size for explainability maps.
-
-        Returns:
-            cam: (B, 1, H, W) maps in [0, 1].
-            logits: (B, K) raw logits (no sigmoid).
-        """
-        m = method.lower()
-        
-        if m == "lime":
-            cam = lime_explain(
-                logits_fn=self.forward,
-                images=batch,
-                class_idx=class_idx,
-                batch_size=batch_size,
-            )
-            return cam
-        
-        raise ValueError(f"Unknown explainability method '{method}'")
 
 
 def prepare_batch(images, device, transform: Optional[Callable] = None):

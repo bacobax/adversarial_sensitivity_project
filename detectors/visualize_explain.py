@@ -46,10 +46,6 @@ def load_batch(paths: np.ndarray, size: int) -> torch.Tensor:
     return torch.stack(imgs, dim=0)
 
 
-def denormalize(batch: torch.Tensor) -> torch.Tensor:
-    return (batch * IMAGENET_STD.to(batch.device)) + IMAGENET_MEAN.to(batch.device)
-
-
 def colorize_cam(cam: torch.Tensor) -> torch.Tensor:
     """
     Simple red colormap: map cam [1,H,W] -> [3,H,W] with red channel = cam, others = (1-cam)*0.
@@ -61,7 +57,6 @@ def colorize_cam(cam: torch.Tensor) -> torch.Tensor:
     
     red = cam.clamp(0, 1)
     blue = -cam.clamp(-1, 0)
-    zeros = torch.zeros_like(cam)
     # make red where cam > 0 and blue where < 0
     bgr = torch.cat([blue, (blue + red) / 3, red], dim=0)
     return bgr

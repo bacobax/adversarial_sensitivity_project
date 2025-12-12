@@ -464,7 +464,7 @@ from PIL import Image
 import numpy as np
 
 from support.base_detector import BaseDetector
-from support.detect_utils import load_image
+from support.detect_utils import load_np_image
 
 
 class YourDetectorName(BaseDetector):
@@ -478,8 +478,8 @@ class YourDetectorName(BaseDetector):
     
     # Declare which features are supported
     supports_explainability = False  # Set to True if implementing maps
-    supports_vulnerability = False   # Set to True if implementing vulnerability analysis
-    supports_adversarial = False     # Set to True if implementing adversarial generation
+    supports_vulnerability = False  # Set to True if implementing vulnerability analysis
+    supports_adversarial = False  # Set to True if implementing adversarial generation
     
     def __init__(self, device: Optional[torch.device] = None):
         super().__init__(device)

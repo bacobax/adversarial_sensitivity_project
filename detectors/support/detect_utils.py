@@ -1,12 +1,12 @@
 import json
 import os
 
+import numpy as np
 import torch
-import torchvision.transforms as transforms
 from PIL import Image
 
 
-def load_image(image_path, size=224):
+def load_np_image(image_path) -> np.ndarray:
     """Load and preprocess an image for detection.
     
     Args:
@@ -20,20 +20,8 @@ def load_image(image_path, size=224):
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image not found: {image_path}")
     
-    image = Image.open(image_path).convert('RGB')
-    
-    # Standard normalization used by most models
-    preprocess = transforms.Compose([
-        transforms.Resize(size),
-        transforms.CenterCrop(size),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225],
-        ),
-    ])
-    
-    return preprocess(image).unsqueeze(0), image
+    image = np.array(Image.open(image_path).convert('RGB'))
+    return image
 
 
 def format_result(prediction, confidence, elapsed_time):

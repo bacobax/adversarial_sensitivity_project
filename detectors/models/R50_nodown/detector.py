@@ -4,7 +4,7 @@ R50_nodown Detector with GradCAM-based vulnerability visualization.
 This detector uses ResNet50 without downsampling and generates saliency maps
 using GradCAM for vulnerability analysis.
 """
-
+import contextlib
 import os
 import sys
 from typing import Optional, Dict, Any, Tuple, Union
@@ -15,7 +15,10 @@ import matplotlib.pyplot as plt
 from PIL import Image
 
 from support.base_detector import BaseDetector
-from support.detect_utils import load_image
+from support.detect_utils import load_np_image
+from utils.detector_wrapper import to_numpy_2d
+
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
 DETECTOR_DIR = os.path.dirname(os.path.abspath(__file__))
 if DETECTOR_DIR in sys.path:
@@ -46,6 +49,9 @@ class R50NoDownDetector(BaseDetector):
         super().__init__(device)
         self.cam = None
         self.image_size = DEFAULT_IMAGE_SIZE
+        self.transform = None
+        self.use_amp = True        # NEW: mixed precision on CUDA to save memory
+
     
     def load(self, model_id: Optional[str] = None) -> None:
         """Load model weights and initialize GradCAM."""
@@ -61,6 +67,7 @@ class R50NoDownDetector(BaseDetector):
             model.load_state_dict(checkpoint)
         model.eval()
         self.model = model
+        self.transform = self.create_transform(self.image_size)
         
         # Initialize GradCAM with the last convolutional layer
         try:
@@ -75,17 +82,20 @@ class R50NoDownDetector(BaseDetector):
         """Predict whether image is fake. Returns confidence [0,1] where higher = more fake."""
         out = self.model(image_tensor)
         return float(torch.sigmoid(out).item())
-    
+    def _amp_ctx(self):  # NEW
+        if self.device is not None and self.device.type == "cuda" and self.use_amp:
+            return torch.amp.autocast( "cuda", dtype=torch.float16)
+        return contextlib.nullcontext()
+
     # =========================================================================
     # ABSTRACT METHOD IMPLEMENTATIONS
     # =========================================================================
     
-    def _compute_explanation_map(
+    def explain(
         self,
-        image: Union[str, Image.Image],
+        image: np.ndarray,
         map_size: Optional[Tuple[int, int]] = None,
-        **kwargs
-    ) -> Tuple[float, np.ndarray]:
+    ) -> np.ndarray:
         """
         Compute GradCAM explanation map for an image.
         
@@ -106,82 +116,51 @@ class R50NoDownDetector(BaseDetector):
             raise RuntimeError("Model not loaded. Call load() first.")
         if self.cam is None:
             raise RuntimeError("GradCAM not initialized. Install pytorch_grad_cam.")
-        
-        from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
-        
-        # Get image path
-        image_path = self._ensure_image_path(image)
-        
-        # Load and preprocess image
-        img_tensor, rgb_img = load_image(image_path, size=self.image_size)
-        img_tensor = img_tensor.to(self.device)
-        
+            
+        image_pil = Image.fromarray(image)  # NEW (avoid overwriting `image`)
+
+        # CAM at reduced resolution to avoid OOM
+        cam_tf = self.create_transform(self.image_size)  # NEW
+
+        img_tensor = cam_tf(image_pil).to(self.device)  # NEW
         if img_tensor.ndim == 3:
             img_tensor = img_tensor.unsqueeze(0)
-        
-        # Get prediction
-        with torch.no_grad():
+
+        self.model.eval()
+
+        # GradCAM needs grads: do NOT wrap the whole forward in no_grad()
+        with self._amp_ctx():  # NEW
             output = self.model(img_tensor)
-            confidence = float(torch.sigmoid(output).item())
-        
-        # Target index: 0 for single output model
+
+        # Target index: for single-logit binary, GradCAM can just target that logit
         target_idx = 0 if output.ndim == 1 or output.shape[-1] == 1 else 1
-        
-        # Generate GradCAM map
-        # print(f"generating gradcam for image: {image_path}")
-        grayscale_cam = self.cam(input_tensor=img_tensor, targets=[ClassifierOutputTarget(target_idx)])
-        cam_map = grayscale_cam[0, :]  # Shape: (H, W)
-        
-        # Resize if needed
-        if cam_map.shape != map_size:
-            from PIL import Image as PILImage
-            cam_pil = PILImage.fromarray((cam_map * 255).astype(np.uint8), mode='L')
-            cam_pil = cam_pil.resize((map_size[1], map_size[0]), PILImage.BILINEAR)
-            cam_map = np.array(cam_pil).astype(np.float32) / 255.0
-        
-        return confidence, cam_map
-    
-    def explain(self, image: np.ndarray, map_size: tuple = None) -> np.ndarray:
-        """
-        Generate explanation/saliency map for an image using GradCAM.
-        
-        This method provides a unified interface for generating explanation maps.
-        For R50_nodown, the explanation map is the GradCAM saliency map.
-        
-        Args:
-            image: RGB image as np.ndarray (H, W, 3) uint8 in [0, 255]
-            map_size: Size of the output map (H, W). Default: (512, 512).
-        
-        Returns:
-            Explanation map as np.ndarray (H, W) float32 in [0, 1]
-        
-        Raises:
-            ValueError: If image is None or invalid
-            RuntimeError: If model is not loaded
-        """
-        if image is None:
-            raise ValueError(f"explain() received None image. model_name={self.name}")
-        
-        if not isinstance(image, np.ndarray):
-            raise ValueError(
-                f"explain() expected np.ndarray, got {type(image)}. model_name={self.name}"
+
+        with self._amp_ctx():  # NEW
+            grayscale_cam = self.cam(
+                input_tensor=img_tensor,
+                targets=[ClassifierOutputTarget(target_idx)],
             )
+
+        cam_map = grayscale_cam[0, :].astype(np.float32)  # NEW
+
+        # Resize CAM map to requested map_size
+        if cam_map.shape != map_size:
+            # cam_pil = Image.Image.fromarray((cam_map * 255).astype(np.uint8), mode='L')
+            cam_pil = Image.fromarray((cam_map * 255).astype(np.uint8), mode="L")  # NEW
+            cam_pil = cam_pil.resize((map_size[1], map_size[0]), Image.BILINEAR)
+            cam_map = np.array(cam_pil).astype(np.float32) / 255.0
+
+        cam_map = to_numpy_2d(cam_map, image.shape[:2])
+
+        # best-effort memory cleanup on CUDA
+        if self.device is not None and self.device.type == "cuda":  # NEW
+            self.model.zero_grad(set_to_none=True)  # NEW
+            torch.cuda.empty_cache()                # NEW (optional but helps in loops)
+
+        return cam_map
         
-        if self.model is None:
-            raise RuntimeError("Model not loaded. Call load() first.")
-        
-        if map_size is None:
-            map_size = (self.image_size, self.image_size)
-        
-        # Convert numpy array to PIL Image and use _compute_explanation_map
-        pil_image = Image.fromarray(image)
-        _, exp_map = self._compute_explanation_map(pil_image, map_size=map_size)
-        
-        # exp_map is already normalized to [0, 1] from _compute_explanation_map
-        return exp_map.astype(np.float32)
-    
     def _compute_vulnerability_map(
-        self, 
+        self,
         image: Union[str, Image.Image],
         attack_type: str = "fgsm",
         epsilon: float = 0.03,
@@ -242,7 +221,7 @@ class R50NoDownDetector(BaseDetector):
         vulnerability_map = cam_map - cam_map_attacked
         
         # Load tensor for return
-        img_tensor, _ = load_image(image_path, size=self.image_size)
+        img_tensor, _ = load_np_image(image_path, size=self.image_size)
         img_tensor = img_tensor.to(self.device)
         
         # Clean up temp file
@@ -298,7 +277,7 @@ class R50NoDownDetector(BaseDetector):
         original_size = original_img.size  # (W, H)
         
         # Load and preprocess image
-        img_tensor, rgb_img = load_image(image_path, size=self.image_size)
+        img_tensor, rgb_img = load_np_image(image_path, size=self.image_size)
         img_tensor = img_tensor.to(self.device)
         
         if img_tensor.ndim == 3:
@@ -366,7 +345,7 @@ class R50NoDownDetector(BaseDetector):
         return self._compute_explanation_map(image_path, map_size=map_size)
     
     def predict_with_vulnerability(
-        self, 
+        self,
         image: Union[str, Image.Image],
         device: str = "cpu",
         map_size: tuple = (512, 512),
@@ -471,7 +450,7 @@ class R50NoDownDetector(BaseDetector):
         # Get or generate adversarial images
         # real images have true_label=0, fake images (samecat/diffcat) have true_label=1
         real_adv_path, gen1 = self._get_or_generate_adversarial(
-            image_set.real, image_set.real_adv, 
+            image_set.real, image_set.real_adv,
             getattr(image_set, 'real_adv_expected', None),
             attack_type, epsilon,
             true_label=0,  # Real image
@@ -532,7 +511,7 @@ class R50NoDownDetector(BaseDetector):
         #vuln_real = np.abs(cam_real - cam_real_adv)
         #vuln_samecat = np.abs(cam_samecat - cam_samecat_adv)
         #vuln_diffcat = np.abs(cam_diffcat - cam_diffcat_adv)
-
+        
         vuln_real = cam_real - cam_real_adv
         vuln_samecat = cam_samecat - cam_samecat_adv
         vuln_diffcat = cam_diffcat - cam_diffcat_adv

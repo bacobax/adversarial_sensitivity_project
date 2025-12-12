@@ -1,7 +1,7 @@
 
 from models.WaveRep.detector import WaveRepDetector
 from models.R50_nodown.detector import R50NoDownDetector
-from support.detect_utils import load_image
+from support.detect_utils import load_np_image
 from detect import parse_weights_map
 import os
 import importlib.util
@@ -115,7 +115,7 @@ for folder in ["../b-free/samecat"]:
         else:
             # Fallback to single-image predictions
             for img_path in tqdm(images, desc=f"{det.name} on {os.path.basename(folder)}"):
-                img_tensor_cpu, _ = load_image(img_path, size=224)
+                img_tensor_cpu, _ = load_np_image(img_path, size=224)
                 img_tensor = img_tensor_cpu.to(det.device)
                 with torch.no_grad():
                     conf = float(det.forward(img_tensor, img_path))

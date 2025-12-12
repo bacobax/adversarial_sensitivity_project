@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import numpy as np
 import torch
@@ -35,7 +35,7 @@ def lime_explain(
     num_samples: int = 150,
     n_segments: int = 24,
     batch_size: int = 64,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """
     Compute LIME masks for a batch tensor normalized with ImageNet stats.
 
@@ -53,6 +53,15 @@ def lime_explain(
         target_cls = 1
     else:
         target_cls = int(class_idx)
+    
+    single_image = False
+    if isinstance(images, Image.Image):
+        images = np.array([images])
+        single_image = True
+    
+    if len(images.shape) == 3:
+        images = np.expand_dims(images, axis=0)
+        single_image = True
     
     cams: List[torch.Tensor] = []
     orig_img = None
@@ -85,6 +94,9 @@ def lime_explain(
         
         m = torch.from_numpy(hm)[None, ...]
         cams.append(m)
+    
+    if single_image:
+        return cams[0][0]
     
     cam_batch = torch.stack(cams, dim=0)  # (B,1,H,W)
     return cam_batch
