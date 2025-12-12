@@ -465,7 +465,8 @@ class BaseDetector(ABC):
         mask = Image.open(mask_path).convert('L')
         return np.array(mask).astype(np.float32) / 255.0
     
-    def _ensure_image_path(self, image: Union[str, Image.Image]) -> str:
+    @staticmethod
+    def _ensure_image_path(image: Union[str, Image.Image]) -> str:
         """
         Ensure we have a file path for the image.
         
@@ -620,6 +621,7 @@ class BaseDetector(ABC):
         batch: np.ndarray,
         method: str = "lime",
         class_idx: Optional[int] = None,
+        batch_size: int = 1,
     ):  # -> Tuple[torch.Tensor, torch.Tensor]
         """
         Compute explainability maps for a batch of already-normalized images.
@@ -628,6 +630,7 @@ class BaseDetector(ABC):
             batch: (B, 3, H, W) tensor normalized with ImageNet stats.
             method: 'gradcam', 'gradsam' or 'smoothgrad' or 'integrated_gradients'.
             class_idx: target logit index; if None, use last logit (fake).
+            batch_size: batch size for explainability maps.
 
         Returns:
             cam: (B, 1, H, W) maps in [0, 1].
@@ -640,7 +643,7 @@ class BaseDetector(ABC):
                 logits_fn=self.forward,
                 images=batch,
                 class_idx=class_idx,
-                batch_size=8,
+                batch_size=batch_size,
             )
             return cam
         

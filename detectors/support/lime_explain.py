@@ -32,7 +32,7 @@ def lime_explain(
     images: np.ndarray,
     class_idx: Optional[int] = None,
     top_labels: Optional[int] = None,
-    num_samples: int = 100,
+    num_samples: int = 150,
     n_segments: int = 24,
     batch_size: int = 64,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -47,9 +47,6 @@ def lime_explain(
     batch_predict = _make_batch_predict_fn(logits_fn)
     explainer = lime_image.LimeImageExplainer()
     
-    def segmentation_fn(x):
-        return slic(x, n_segments=n_segments, compactness=20, start_label=0)
-    
     # Determine which class to visualize
     if class_idx is None:
         # For single-logit detectors we visualize the positive class (index 1)
@@ -58,7 +55,15 @@ def lime_explain(
         target_cls = int(class_idx)
     
     cams: List[torch.Tensor] = []
-    for img in tqdm(images, leave=False):
+    orig_img = None
+    for i, img in tqdm(enumerate(images), leave=False):
+        def segmentation_fn(_):  # FIXME !!! assumes images are in pairs (original, adversarial)
+            nonlocal orig_img
+            if i % 2 == 0:
+                orig_img = img
+            im = orig_img
+            return slic(im, n_segments=n_segments, compactness=20, start_label=0)
+        
         explanation = explainer.explain_instance(
             image=img,
             classifier_fn=batch_predict,
