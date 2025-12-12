@@ -118,7 +118,7 @@ for folder in ["../b-free/samecat"]:
                 img_tensor_cpu, _ = load_image(img_path, size=224)
                 img_tensor = img_tensor_cpu.to(det.device)
                 with torch.no_grad():
-                    conf = float(det.predict(img_tensor, img_path))
+                    conf = float(det.forward(img_tensor, img_path))
                     print(conf)
                     pred_flag = det.label_from_conf(conf)
                         # writer.writerow([

@@ -12,7 +12,7 @@ behavior while inheriting common functionality.
 import csv
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -20,6 +20,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from .detect_utils import get_device, load_image
+from .lime_explain import lime_explain
 
 
 class BaseDetector(ABC):
@@ -87,18 +88,29 @@ class BaseDetector(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def predict(self, image_tensor: torch.Tensor, image_path: str) -> float:
+    def forward(self, images):
         """
         Predict whether an image is fake.
         
         Args:
-            image_tensor: Preprocessed image tensor
-            image_path: Path to original image (for reference)
+            images: Preprocessed image tensor
         
         Returns:
             float: Confidence score in [0, 1] where higher = more likely fake
         """
         raise NotImplementedError
+    
+    def __call__(self, images) -> float:
+        """
+        Predict whether an image is fake.
+        
+        Args:
+            images: Preprocessed image tensor
+        
+        Returns:
+            float: Confidence score in [0, 1] where higher = more likely fake
+        """
+        return self.forward(images)
     
     # =========================================================================
     # OPTIONAL ABSTRACT METHODS - Implement for explainability/vulnerability
@@ -586,42 +598,77 @@ class BaseDetector(ABC):
                             pbar.update(len(chunk))
                         pbar.close()
                     else:
+                        raise NotImplementedError('detector.predict() not implemented')
                         # Fallback to single-image predictions
-                        for img_path in tqdm(images, desc=f"{det.name} on {os.path.basename(folder)}"):
-                            img_tensor_cpu, _ = load_image(img_path, size=224)
-                            img_tensor = img_tensor_cpu.to(det.device)
-                            with torch.no_grad():
-                                conf = float(det.predict(img_tensor, img_path))
-                            pred_flag = det.label_from_conf(conf)
-                            writer.writerow([
-                                folder,
-                                os.path.relpath(img_path, folder),
-                                det.name,
-                                f"{conf:.6f}",
-                                str(pred_flag),
-                            ])
-                            f.flush()
+                        # for img_path in tqdm(images, desc=f"{det.name} on {os.path.basename(folder)}"):
+                        #     img_tensor_cpu, _ = load_image(img_path, size=224)
+                        #     img_tensor = img_tensor_cpu.to(det.device)
+                        #     with torch.no_grad():
+                        #         conf = float(det.predict(img_tensor, img_path))
+                        #     pred_flag = det.label_from_conf(conf)
+                        #     writer.writerow([
+                        #         folder,
+                        #         os.path.relpath(img_path, folder),
+                        #         det.name,
+                        #         f"{conf:.6f}",
+                        #         str(pred_flag),
+                        #     ])
+                        #     f.flush()
     
-    # =========================================================================
-    # CAPABILITY CHECKING
-    # =========================================================================
-    
-    def get_capabilities(self) -> Dict[str, bool]:
+    def explain(
+        self,
+        batch: np.ndarray,
+        method: str = "lime",
+        class_idx: Optional[int] = None,
+    ):  # -> Tuple[torch.Tensor, torch.Tensor]
         """
-        Get dictionary of detector capabilities.
-        
+        Compute explainability maps for a batch of already-normalized images.
+
+        Args:
+            batch: (B, 3, H, W) tensor normalized with ImageNet stats.
+            method: 'gradcam', 'gradsam' or 'smoothgrad' or 'integrated_gradients'.
+            class_idx: target logit index; if None, use last logit (fake).
+
         Returns:
-            Dict with capability flags
+            cam: (B, 1, H, W) maps in [0, 1].
+            logits: (B, K) raw logits (no sigmoid).
         """
-        return {
-            'explainability': self.supports_explainability,
-            'vulnerability': self.supports_vulnerability,
-            'adversarial': self.supports_adversarial,
-            'batch_predict': hasattr(self, 'batch_predict') and callable(getattr(self, 'batch_predict')),
-            'visualization': hasattr(self, 'visualize_vulnerability_grid'),
-        }
+        m = method.lower()
+        
+        if m == "lime":
+            cam = lime_explain(
+                logits_fn=self.forward,
+                images=batch,
+                class_idx=class_idx,
+                batch_size=8,
+            )
+            return cam
+        
+        raise ValueError(f"Unknown explainability method '{method}'")
+
+
+def prepare_batch(images, device, transform: Optional[Callable] = None):
+    # Normalize input into a list of PIL Images
+    frames = []
     
-    def __repr__(self) -> str:
-        capabilities = self.get_capabilities()
-        caps_str = ", ".join(k for k, v in capabilities.items() if v)
-        return f"{self.__class__.__name__}(name='{self.name}', device={self.device}, capabilities=[{caps_str}])"
+    # Treat list/tuple/ndarray as a batch
+    if isinstance(images, (list, tuple, np.ndarray)):
+        iterable = images
+    else:
+        iterable = [images]
+    
+    for img in iterable:
+        # Allow passing paths, NumPy arrays, or PIL Images
+        if isinstance(img, str):
+            img = Image.open(img).convert('RGB')
+        elif isinstance(img, np.ndarray):
+            # Expect HWC, uint8 or float in [0, 255] / [0, 1]
+            if img.dtype != np.uint8:
+                img = np.clip(img, 0, 255).astype(np.uint8)
+            img = Image.fromarray(img)
+        # If it's already a PIL.Image.Image or tensor, let the transform handle it
+        if transform is not None:
+            img = transform(img)
+        frames.append(img)
+    
+    return torch.stack(frames, 0).to(device)

@@ -549,7 +549,7 @@ detector.load()
 
 # Test prediction
 image_tensor, _ = load_image('path/to/image.jpg', size=224)
-confidence = detector.predict(image_tensor, 'path/to/image.jpg')
+confidence = detector.forward(image_tensor, 'path/to/image.jpg')
 print(f"Prediction: {confidence:.3f}")
 ```
 
@@ -584,63 +584,64 @@ class MyDetector(BaseDetector):
 
 ```python
 def _compute_explanation_map(
-    self,
-    image,
-    map_size: Optional[Tuple[int, int]] = None,
-    **kwargs
+        self,
+        image,
+        map_size: Optional[Tuple[int, int]] = None,
+        **kwargs
 ) -> Tuple[float, np.ndarray]:
-    """
-    Compute explanation map for the image.
-    
-    Args:
-        image: Image path (str) or PIL Image
-        map_size: Output map size (H, W). If None, use detector default.
-        **kwargs: Additional detector-specific arguments
-        
-    Returns:
-        Tuple of (confidence, explanation_map)
-            - confidence: float in [0, 1]
-            - explanation_map: np.ndarray of shape (H, W) in [0, 1]
-    """
-    if map_size is None:
-        map_size = (self.image_size, self.image_size)
-    
-    # Get image path
-    image_path = self._ensure_image_path(image)
-    
-    # Load and preprocess image
-    img_tensor, _ = load_image(image_path, size=self.image_size)
-    img_tensor = img_tensor.to(self.device)
-    
-    # Get prediction
-    with torch.no_grad():
-        confidence = self.predict(img_tensor, image_path)
-    
-    # Generate explanation map using your method
-    # Examples: GradCAM, attention maps, anomaly maps, etc.
-    explanation_map = self._my_explanation_method(img_tensor)
-    
-    # Resize to desired size
-    if explanation_map.shape != map_size:
-        explanation_map = self._resize_map(explanation_map, map_size)
-    
-    return confidence, explanation_map
+  """
+  Compute explanation map for the image.
+  
+  Args:
+      image: Image path (str) or PIL Image
+      map_size: Output map size (H, W). If None, use detector default.
+      **kwargs: Additional detector-specific arguments
+      
+  Returns:
+      Tuple of (confidence, explanation_map)
+          - confidence: float in [0, 1]
+          - explanation_map: np.ndarray of shape (H, W) in [0, 1]
+  """
+  if map_size is None:
+    map_size = (self.image_size, self.image_size)
+
+  # Get image path
+  image_path = self._ensure_image_path(image)
+
+  # Load and preprocess image
+  img_tensor, _ = load_image(image_path, size=self.image_size)
+  img_tensor = img_tensor.to(self.device)
+
+  # Get prediction
+  with torch.no_grad():
+    confidence = self.forward(img_tensor, image_path)
+
+  # Generate explanation map using your method
+  # Examples: GradCAM, attention maps, anomaly maps, etc.
+  explanation_map = self._my_explanation_method(img_tensor)
+
+  # Resize to desired size
+  if explanation_map.shape != map_size:
+    explanation_map = self._resize_map(explanation_map, map_size)
+
+  return confidence, explanation_map
 
 
 def _my_explanation_method(self, img_tensor):
-    """Your custom explanation generation logic."""
-    # Example: GradCAM, saliency, attention visualization, etc.
-    pass
+  """Your custom explanation generation logic."""
+  # Example: GradCAM, saliency, attention visualization, etc.
+  pass
+
 
 @staticmethod
 def _resize_map(map_np: np.ndarray, target_size: Tuple[int, int]) -> np.ndarray:
-    """Resize explanation map to target size."""
-    from PIL import Image as PILImage
-    if map_np.shape == target_size:
-        return map_np
-    map_img = PILImage.fromarray((map_np * 255).astype(np.uint8), mode='L')
-    map_img = map_img.resize((target_size[1], target_size[0]), PILImage.BILINEAR)
-    return np.array(map_img).astype(np.float32) / 255.0
+  """Resize explanation map to target size."""
+  from PIL import Image as PILImage
+  if map_np.shape == target_size:
+    return map_np
+  map_img = PILImage.fromarray((map_np * 255).astype(np.uint8), mode='L')
+  map_img = map_img.resize((target_size[1], target_size[0]), PILImage.BILINEAR)
+  return np.array(map_img).astype(np.float32) / 255.0
 ```
 
 #### Step 3: Use the Public API
@@ -981,11 +982,13 @@ detector.label_from_conf(conf)         # Convert confidence to label
 ## FAQ
 
 **Q: How do I test my new detector?**
+
 ```python
 from models.MyDetector.detector import MyDetector
+
 detector = MyDetector(device='cpu')
 detector.load()
-conf = detector.predict(tensor, 'image.jpg')
+conf = detector.forward(tensor, 'image.jpg')
 ```
 
 **Q: Can I use a different attack library?**

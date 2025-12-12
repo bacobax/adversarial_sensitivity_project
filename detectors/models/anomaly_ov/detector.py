@@ -22,7 +22,7 @@ if DETECTOR_DIR not in sys.path:
     sys.path.insert(0, DETECTOR_DIR)
 
 # Import BaseDetector from the support module (parent directory)
-from support.base_detector import BaseDetector
+from support.base_detector import BaseDetector, prepare_batch
 
 # Internal imports from the anomaly_ov module
 from llava.model.anomaly_expert import AnomalyOV
@@ -178,53 +178,63 @@ class AnomalyOVDetector(BaseDetector):
         
         self.image_processor = self.vision_tower.image_processor
     
-    def predict(self, image_tensor: torch.Tensor, image_path: str) -> float:
-        """
-        Predict whether an image is real or fake.
+    def forward(self, images) -> torch.Tensor:
+        """Predict whether image(s) are real or fake.
         
-        Note: For AnomalyOV, we need to use the internal image processor
-        rather than the standard preprocessing, so we load from image_path.
+        This mirrors the batch-style structure of WaveRepDetector.forward:
+        it accepts a single image or a batch and returns a CPU tensor of
+        confidences.
         
         Args:
-            image_tensor: Preprocessed image tensor (may be ignored for this detector)
-            image_path: Path to the original image
-            
+            images: Single image or iterable of images. Each element can be:
+                - str (path to image)
+                - PIL.Image.Image
+                - np.ndarray
+        
         Returns:
-            float: Confidence score in [0, 1], where higher values indicate 
-                   the image is more likely to be FAKE (anomalous).
+            torch.Tensor: 1D tensor of confidence scores on CPU, where higher
+                values indicate the image is more likely to be FAKE (anomalous).
         """
         if self.vision_tower is None or self.anomaly_expert is None:
             raise RuntimeError("Model not loaded. Call load() first.")
-        
-        # Load and preprocess image using the internal processor
-        image = Image.open(image_path).convert('RGB')
-        processed = self.image_processor.preprocess([image], return_tensors='pt')
-        pixel_values = processed['pixel_values'][0]  # Get the tensor
-        
-        # Convert to tensor and move to device
-        if not isinstance(pixel_values, torch.Tensor):
-            pixel_values = torch.tensor(pixel_values)
-        pixel_values = pixel_values.unsqueeze(0).to(self.device, dtype=self._dtype)
-        
+
+        # Prepare a transform that uses the Anomaly-OV image processor
+        def _transform(img):
+            processed = self.image_processor.preprocess([img], return_tensors='pt')
+            pixel_values = processed['pixel_values'][0]
+            if not isinstance(pixel_values, torch.Tensor):
+                pixel_values = torch.tensor(pixel_values)
+            return pixel_values
+
+        # Use shared batch preparation utility (mirrors WaveRepDetector.forward)
+        pixel_values = prepare_batch(images, self.device, _transform)
+
+        # Ensure shape is [B, V, 3, H, W]; most common case is V=1
+        if pixel_values.ndim == 4:
+            pixel_values = pixel_values.unsqueeze(1)
+
+        b, v, c, h, w = pixel_values.shape
+        pixel_values = pixel_values.view(b * v, c, h, w)
+
         with torch.no_grad():
             # Encode images through vision tower
             image_features, image_level_features = self.vision_tower(pixel_values)
-            
-            # Get anomaly prediction
+
             # split_sizes represents number of patches per image (for batching)
-            split_sizes = [image_features.shape[0]]
-            
+            patches_per_image = image_features.shape[0] // (b * v)
+            split_sizes = [patches_per_image] * (b * v)
+
             _, _, final_prediction = self.anomaly_expert(
-                image_features, 
-                image_level_features, 
+                image_features,
+                image_level_features,
                 split_sizes,
-                return_anomaly_map=False
+                return_anomaly_map=False,
+                return_probabilities=False,
             )
-            
-            # final_prediction is in [0, 1] where 1 = anomalous (fake)
-            confidence = float(final_prediction.squeeze().cpu().item())
-        
-        return confidence
+
+        # final_prediction is in [0, 1] where 1 = anomalous (fake)
+        final_prediction = final_prediction.view(b, v, -1).mean(dim=(1, 2))
+        return final_prediction.detach().cpu().float()
     
     def predict_with_map(self, image_path: str, anomaly_map_size: tuple = (224, 224)):
         """

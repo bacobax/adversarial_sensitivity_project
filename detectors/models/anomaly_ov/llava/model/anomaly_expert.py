@@ -175,7 +175,7 @@ class AnomalyOV(nn.Module):
 
         return anomaly_map, patch_significances
 
-    def forward(self, ov_image_features, sig_multi_level_features, split_sizes, return_anomaly_map=False, anomaly_map_size=(224, 224)):
+    def forward(self, ov_image_features, sig_multi_level_features, split_sizes, return_anomaly_map=False, anomaly_map_size=(224, 224), return_probabilities=True):
         # ov_image_features is a tensor with size of [batch_size * num_patches, 729, self.ov_token_hidden_size]
         # sig_multi_level_features is a list of tensors, each tensor is [batch_size * num_patches, 729, self.siglip_hidden_dim]
         # split_sizes is a list of integers, each integer is the number of patches in the corresponding image
@@ -235,7 +235,8 @@ class AnomalyOV(nn.Module):
         final_attention_output = torch.cat(attention_output_list, dim=0).unsqueeze(1) # [batch_size, 1, self.ov_token_hidden_size]
         # get the final prediction
         final_prediction = self.final_predictor(final_attention_output.squeeze(1)) # [batch_size, 1]
-        final_prediction = self.sigmoid(final_prediction) # [batch_size, 1]
+        if return_probabilities:
+            final_prediction = self.sigmoid(final_prediction) # [batch_size, 1]
 
         # Restore outputs to original device and dtype
         major_attention_output = major_attention_output.to(orig_device, dtype=orig_dtype)
