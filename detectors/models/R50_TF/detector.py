@@ -63,6 +63,6 @@ class R50TFDetector(BaseDetector):
         model.eval()
         self.model = model
     
-    def predict(self, image_tensor: torch.Tensor, image_path: str) -> float:
+    def forward(self, image_tensor: torch.Tensor) -> float:
         out = self.model(image_tensor).squeeze(1)
         return float(torch.sigmoid(out).item())

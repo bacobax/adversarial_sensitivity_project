@@ -71,7 +71,7 @@ class R50NoDownDetector(BaseDetector):
             print("[warn] pytorch_grad_cam not installed. GradCAM features disabled.")
             self.cam = None
     
-    def predict(self, image_tensor: torch.Tensor, image_path: str) -> float:
+    def forward(self, image_tensor: torch.Tensor) -> float:
         """Predict whether image is fake. Returns confidence [0,1] where higher = more fake."""
         out = self.model(image_tensor)
         return float(torch.sigmoid(out).item())
