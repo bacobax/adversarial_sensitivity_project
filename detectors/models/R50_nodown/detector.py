@@ -141,6 +141,45 @@ class R50NoDownDetector(BaseDetector):
         
         return confidence, cam_map
     
+    def explain(self, image: np.ndarray, map_size: tuple = None) -> np.ndarray:
+        """
+        Generate explanation/saliency map for an image using GradCAM.
+        
+        This method provides a unified interface for generating explanation maps.
+        For R50_nodown, the explanation map is the GradCAM saliency map.
+        
+        Args:
+            image: RGB image as np.ndarray (H, W, 3) uint8 in [0, 255]
+            map_size: Size of the output map (H, W). Default: (512, 512).
+        
+        Returns:
+            Explanation map as np.ndarray (H, W) float32 in [0, 1]
+        
+        Raises:
+            ValueError: If image is None or invalid
+            RuntimeError: If model is not loaded
+        """
+        if image is None:
+            raise ValueError(f"explain() received None image. model_name={self.name}")
+        
+        if not isinstance(image, np.ndarray):
+            raise ValueError(
+                f"explain() expected np.ndarray, got {type(image)}. model_name={self.name}"
+            )
+        
+        if self.model is None:
+            raise RuntimeError("Model not loaded. Call load() first.")
+        
+        if map_size is None:
+            map_size = (self.image_size, self.image_size)
+        
+        # Convert numpy array to PIL Image and use _compute_explanation_map
+        pil_image = Image.fromarray(image)
+        _, exp_map = self._compute_explanation_map(pil_image, map_size=map_size)
+        
+        # exp_map is already normalized to [0, 1] from _compute_explanation_map
+        return exp_map.astype(np.float32)
+    
     def _compute_vulnerability_map(
         self, 
         image: Union[str, Image.Image],
@@ -199,7 +238,8 @@ class R50NoDownDetector(BaseDetector):
         confidence_attacked, cam_map_attacked = self._compute_explanation_map(adv_path, map_size=map_size)
         
         # Compute vulnerability map
-        vulnerability_map = np.abs(cam_map - cam_map_attacked)
+        #vulnerability_map = np.abs(cam_map - cam_map_attacked)
+        vulnerability_map = cam_map - cam_map_attacked
         
         # Load tensor for return
         img_tensor, _ = load_image(image_path, size=self.image_size)
@@ -489,9 +529,13 @@ class R50NoDownDetector(BaseDetector):
         pred_diffcat_adv, cam_diffcat_adv = get_map_cached(diffcat_adv_path)
         
         # Compute vulnerability maps (|original - attacked|)
-        vuln_real = np.abs(cam_real - cam_real_adv)
-        vuln_samecat = np.abs(cam_samecat - cam_samecat_adv)
-        vuln_diffcat = np.abs(cam_diffcat - cam_diffcat_adv)
+        #vuln_real = np.abs(cam_real - cam_real_adv)
+        #vuln_samecat = np.abs(cam_samecat - cam_samecat_adv)
+        #vuln_diffcat = np.abs(cam_diffcat - cam_diffcat_adv)
+
+        vuln_real = cam_real - cam_real_adv
+        vuln_samecat = cam_samecat - cam_samecat_adv
+        vuln_diffcat = cam_diffcat - cam_diffcat_adv
         
         # Create figure with 5 rows x 3 columns
         fig, axes = plt.subplots(5, 3, figsize=(12, 20))

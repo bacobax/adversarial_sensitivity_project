@@ -2,8 +2,18 @@
 Analysis Runner Script for Forgery-Localization Pipeline
 
 This script performs quantitative analysis and visualization on the output
-of a forgery-localization pipeline. It loads CSV files from the analysis/
-directory, computes aggregated metrics, and generates charts and tables.
+of spatial_corr_test.py. It loads CSV files from the analysis/ directory,
+computes aggregated metrics, and generates charts and tables.
+
+Input structure (from spatial_corr_test.py):
+    analysis/
+    ├── <model>/
+    │   ├── metrics_explanation.csv          # Attack-independent explanation metrics
+    │   ├── <attack>/
+    │   │   └── metrics_vulnerability.csv    # Per-attack vulnerability metrics
+    │   └── vis/
+    │       └── <attack>/
+    │           └── <filename>_grid.png      # Visualization grids
 
 Output structure:
     analysis_results/
@@ -14,13 +24,13 @@ Output structure:
     │   └── vulnerability_samecat_vs_diffcat.csv
     └── charts/
         ├── explanation/
-        │   ├── mass_frac_bar.png
-        │   ├── pr_auc_heatmap.png
+        │   ├── mass_frac_bar.png            # Bar chart by model and image_type
+        │   ├── pr_auc_heatmap.png           # Heatmap by model (attack-independent)
         │   ├── samecat_vs_diffcat_scatter.png
         │   └── mass_frac_distribution.png
         └── vulnerability/
-            ├── mass_frac_bar.png
-            ├── pr_auc_heatmap.png
+            ├── mass_frac_bar.png            # Bar chart by model and attack_type
+            ├── pr_auc_heatmap.png           # Heatmap by model × attack_type
             ├── samecat_vs_diffcat_scatter.png
             └── mass_frac_distribution.png
 """
@@ -500,17 +510,18 @@ def plot_explanation_mass_frac_bar(df: pd.DataFrame, output_path: Path) -> None:
 
 def plot_explanation_pr_auc_heatmap(df: pd.DataFrame, output_path: Path) -> None:
     """
-    E2: Heatmap of PR-AUC for each (model × attack_type).
+    E2: Heatmap of PR-AUC for each (model × image_type).
+    Explanation is attack-independent, so we show metrics by image_type.
     """
-    if df.empty or "pr_auc" not in df.columns or "attack_type" not in df.columns:
+    if df.empty or "pr_auc" not in df.columns or "image_type" not in df.columns:
         print("  Skipping E2: insufficient data")
         return
     
-    # Compute means
-    grouped = df.groupby(["model", "attack_type"], as_index=False)["pr_auc"].mean()
+    # Compute means by model and image_type
+    grouped = df.groupby(["model", "image_type"], as_index=False)["pr_auc"].mean()
     
     # Pivot for heatmap
-    pivot_df = grouped.pivot(index="model", columns="attack_type", values="pr_auc")
+    pivot_df = grouped.pivot(index="model", columns="image_type", values="pr_auc")
     
     fig, ax = plt.subplots(figsize=HEATMAP_SIZE)
     
@@ -524,8 +535,8 @@ def plot_explanation_pr_auc_heatmap(df: pd.DataFrame, output_path: Path) -> None
         linewidths=0.5
     )
     
-    ax.set_title("Explanation Maps: PR-AUC by Model and Attack Type", fontsize=14)
-    ax.set_xlabel("Attack Type", fontsize=12)
+    ax.set_title("Explanation Maps: PR-AUC by Model and Image Type", fontsize=14)
+    ax.set_xlabel("Image Type", fontsize=12)
     ax.set_ylabel("Model", fontsize=12)
     
     plt.tight_layout()
@@ -585,29 +596,19 @@ def plot_explanation_samecat_vs_diffcat_scatter(df: pd.DataFrame, output_path: P
 def plot_explanation_mass_frac_distribution(df: pd.DataFrame, output_path: Path) -> None:
     """
     E4: Distribution (KDE) of mass_frac per image, overlayed per model.
-    Uses benign data only (attack_type == 'none' if available, else all data).
+    Explanation data is attack-independent (computed from original benign images).
     """
     if df.empty or "mass_frac" not in df.columns:
         print("  Skipping E4: insufficient data")
         return
     
-    # Filter to benign only if attack_type column exists
-    if "attack_type" in df.columns and "none" in df["attack_type"].values:
-        plot_df = df[df["attack_type"] == "none"]
-    else:
-        plot_df = df
-    
-    if plot_df.empty:
-        print("  Skipping E4: no benign data available")
-        return
-    
     fig, ax = plt.subplots(figsize=FIGURE_SIZE)
     
-    models = plot_df["model"].unique()
+    models = df["model"].unique()
     colors = sns.color_palette("husl", len(models))
     
     for i, model in enumerate(models):
-        model_data = plot_df[plot_df["model"] == model]["mass_frac"].dropna()
+        model_data = df[df["model"] == model]["mass_frac"].dropna()
         if len(model_data) > 1:
             sns.kdeplot(data=model_data, ax=ax, label=model, color=colors[i], linewidth=2)
     

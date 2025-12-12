@@ -241,7 +241,7 @@ class AnomalyOVDetector(BaseDetector):
         Predict whether an image is fake and return the anomaly map.
         
         Args:
-            image_path: Path to the image
+            image_path: Path to the image **or** PIL Image / ndarray
             anomaly_map_size: Size of the returned anomaly map
             
         Returns:
@@ -252,8 +252,14 @@ class AnomalyOVDetector(BaseDetector):
         if self.vision_tower is None or self.anomaly_expert is None:
             raise RuntimeError("Model not loaded. Call load() first.")
         
-        # Load and preprocess image
-        image = Image.open(image_path).convert('RGB')
+        # Accept path, PIL.Image, or ndarray
+        if isinstance(image_path, Image.Image):
+            image = image_path.convert('RGB')
+        elif hasattr(image_path, 'shape'):
+            image = Image.fromarray(np.array(image_path)).convert('RGB')
+        else:
+            image = Image.open(image_path).convert('RGB')
+        
         processed = self.image_processor.preprocess([image], return_tensors='pt')
         pixel_values = processed['pixel_values'][0]
         
@@ -276,6 +282,76 @@ class AnomalyOVDetector(BaseDetector):
             confidence = float(final_prediction.squeeze().cpu().item())
             
         return confidence, anomaly_map
+
+    def explain(self, image: np.ndarray, map_size: tuple = (384, 384)) -> np.ndarray:
+        """
+        Generate explanation/saliency map for an image.
+        
+        This method provides a unified interface for generating explanation maps.
+        For AnomalyOV, the explanation map is the anomaly map produced by the model.
+        
+        Args:
+            image: RGB image as np.ndarray (H, W, 3) uint8 in [0, 255]
+            map_size: Size of the output map (H, W). Default: (384, 384) for SigLip resolution.
+        
+        Returns:
+            Explanation map as np.ndarray (H, W) float32 in [0, 1]
+        
+        Raises:
+            ValueError: If image is None or invalid
+            RuntimeError: If model is not loaded
+        """
+        if image is None:
+            raise ValueError(f"explain() received None image. model_name={self.name}")
+        
+        if not isinstance(image, np.ndarray):
+            raise ValueError(
+                f"explain() expected np.ndarray, got {type(image)}. model_name={self.name}"
+            )
+        
+        if self.vision_tower is None or self.anomaly_expert is None:
+            raise RuntimeError("Model not loaded. Call load() first.")
+        
+        # Convert numpy array to PIL Image
+        pil_image = Image.fromarray(image)
+        
+        # Use image processor to preprocess
+        processed = self.image_processor.preprocess([pil_image], return_tensors='pt')
+        pixel_values = processed['pixel_values'][0]
+        
+        if not isinstance(pixel_values, torch.Tensor):
+            pixel_values = torch.tensor(pixel_values)
+        pixel_values = pixel_values.unsqueeze(0).to(self.device, dtype=self._dtype)
+        
+        with torch.no_grad():
+            image_features, image_level_features = self.vision_tower(pixel_values)
+            split_sizes = [image_features.shape[0]]
+            
+            _, _, _, anomaly_map = self.anomaly_expert(
+                image_features,
+                image_level_features,
+                split_sizes,
+                return_anomaly_map=True,
+                anomaly_map_size=map_size
+            )
+        
+        # Convert to numpy and normalize to [0, 1]
+        exp_map = anomaly_map.detach().cpu().float()
+        
+        # Squeeze extra dimensions: [1, 1, H, W] -> [H, W]
+        while exp_map.ndim > 2:
+            exp_map = exp_map.squeeze(0)
+        
+        exp_map = exp_map.numpy()
+        
+        # Normalize to [0, 1]
+        exp_min, exp_max = exp_map.min(), exp_map.max()
+        if exp_max > exp_min:
+            exp_map = (exp_map - exp_min) / (exp_max - exp_min)
+        else:
+            exp_map = np.zeros_like(exp_map)
+        
+        return exp_map.astype(np.float32)
 
     def predict_with_vulnerability(
         self, 
@@ -761,9 +837,13 @@ class AnomalyOVDetector(BaseDetector):
         am_diffcat_adv_np = self._map_to_numpy(am_diffcat_adv)
         
         # Compute vulnerability maps (|original - attacked|)
-        vuln_real_np = np.abs(am_real_np - am_real_adv_np)
-        vuln_samecat_np = np.abs(am_samecat_np - am_samecat_adv_np)
-        vuln_diffcat_np = np.abs(am_diffcat_np - am_diffcat_adv_np)
+        #vuln_real_np = np.abs(am_real_np - am_real_adv_np)
+        #vuln_samecat_np = np.abs(am_samecat_np - am_samecat_adv_np)
+        #vuln_diffcat_np = np.abs(am_diffcat_np - am_diffcat_adv_np)
+
+        vuln_real_np = am_real_np - am_real_adv_np
+        vuln_samecat_np = am_samecat_np - am_samecat_adv_np
+        vuln_diffcat_np = am_diffcat_np - am_diffcat_adv_np
         
         # Create figure with 5 rows x 3 columns
         fig, axes = plt.subplots(5, 3, figsize=(12, 20))
