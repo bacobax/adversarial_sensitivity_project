@@ -56,6 +56,13 @@ LIME_BATCH_SIZE = 64
 LIME_NUM_SAMPLES = 150
 
 
+def to_numpy(arr):
+    """Convert tensor or array to numpy array on CPU."""
+    if isinstance(arr, torch.Tensor):
+        return arr.detach().cpu().numpy()
+    return np.asarray(arr)
+
+
 def process_sample(
     sample: SamplePaths,
     detector: BaseDetector,
@@ -156,12 +163,12 @@ def process_sample(
         if cache_key in exp_cache:
             exp_orig = exp_cache[cache_key]
         else:
-            exp_orig = detector.explain(image_np, **kwargs)
+            exp_orig = to_numpy(detector.explain(image_np, **kwargs))
             exp_cache[cache_key] = exp_orig
         vis_data['exp_orig'][img_type] = exp_orig
         
         # Compute explanation on attacked image
-        exp_adv = detector.explain(adv_image, **kwargs)
+        exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
         vis_data['exp_adv'][img_type] = exp_adv
         
         # Compute vulnerability map

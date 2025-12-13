@@ -43,6 +43,17 @@ def create_visualization_grid(
     # Row names
     row_names = ['Image', 'Exp Original', 'Exp Attacked', 'Vulnerability', 'GT Mask']
     
+    def _prep_map(data: Dict[str, np.ndarray], key: str) -> np.ndarray:
+        """Resize and squeeze heatmaps to HxW for matplotlib."""
+        if key not in data or data[key] is None:
+            return None
+        if key not in images:
+            return None
+        try:
+            return to_numpy_2d(data[key], images[key].shape[:2])
+        except Exception:
+            return None
+    
     # Create figure
     fig = plt.figure(figsize=(12, 15))
     gs = gridspec.GridSpec(5, 3, figure=fig, hspace=0.1, wspace=0.05)
@@ -61,11 +72,12 @@ def create_visualization_grid(
         
         # Row 1: Original explanation
         ax = fig.add_subplot(gs[1, col_idx])
-        if img_type in exp_orig and exp_orig[img_type] is not None:
+        exp_map = _prep_map(exp_orig, img_type)
+        if exp_map is not None:
             if detector_name == "WaveRep":
-                ax.imshow(colorize_cam(exp_orig[img_type]))
+                ax.imshow(colorize_cam(exp_map))
             else:
-                ax.imshow(exp_orig[img_type], cmap='jet', vmin=0, vmax=1)
+                ax.imshow(exp_map, cmap='jet', vmin=0, vmax=1)
         else:
             ax.imshow(np.zeros((10, 10)), cmap='gray')
         if col_idx == 0:
@@ -74,11 +86,12 @@ def create_visualization_grid(
         
         # Row 2: Attacked explanation
         ax = fig.add_subplot(gs[2, col_idx])
-        if img_type in exp_adv and exp_adv[img_type] is not None:
+        exp_adv_map = _prep_map(exp_adv, img_type)
+        if exp_adv_map is not None:
             if detector_name == "WaveRep":
-                ax.imshow(colorize_cam(exp_adv[img_type]))
+                ax.imshow(colorize_cam(exp_adv_map))
             else:
-                ax.imshow(exp_adv[img_type], cmap='jet', vmin=0, vmax=1)
+                ax.imshow(exp_adv_map, cmap='jet', vmin=0, vmax=1)
         else:
             ax.imshow(np.zeros((10, 10)), cmap='gray')
         if col_idx == 0:
@@ -87,11 +100,12 @@ def create_visualization_grid(
         
         # Row 3: Vulnerability map
         ax = fig.add_subplot(gs[3, col_idx])
-        if img_type in vuln_maps and vuln_maps[img_type] is not None:
+        vuln_map = _prep_map(vuln_maps, img_type)
+        if vuln_map is not None:
             if detector_name == "WaveRep":
-                ax.imshow(colorize_cam(vuln_maps[img_type]))
+                ax.imshow(colorize_cam(vuln_map))
             else:
-                ax.imshow(vuln_maps[img_type], cmap='jet', vmin=0, vmax=1)
+                ax.imshow(vuln_map, cmap='jet', vmin=0, vmax=1)
         else:
             ax.imshow(np.zeros((10, 10)), cmap='gray')
         if col_idx == 0:
