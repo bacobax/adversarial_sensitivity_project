@@ -54,6 +54,36 @@ def create_visualization_grid(
         except Exception:
             return None
     
+    def _prep_vuln_map(data: Dict[str, np.ndarray], key: str) -> np.ndarray:
+        """Prepare vulnerability map without per-image normalization."""
+        if key not in data or data[key] is None:
+            return None
+        if key not in images:
+            return None
+        try:
+            return to_numpy_2d_raw(data[key], images[key].shape[:2])
+        except Exception:
+            return None
+    
+    # Collect all vulnerability maps to compute consistent scale across columns
+    vuln_maps_prepared = {}
+    for img_type in columns:
+        vuln_maps_prepared[img_type] = _prep_vuln_map(vuln_maps, img_type)
+    
+    # Compute global vmax for vulnerability maps (use 95th percentile for robustness)
+    all_vuln_values = []
+    for v in vuln_maps_prepared.values():
+        if v is not None:
+            all_vuln_values.append(v.flatten())
+    
+    if all_vuln_values:
+        all_vuln_concat = np.concatenate(all_vuln_values)
+        vuln_vmax = np.percentile(np.abs(all_vuln_concat), 95)
+        if vuln_vmax < 1e-6:
+            vuln_vmax = 1.0  # Fallback if all values are ~0
+    else:
+        vuln_vmax = 1.0
+    
     # Create figure
     fig = plt.figure(figsize=(12, 15))
     gs = gridspec.GridSpec(5, 3, figure=fig, hspace=0.1, wspace=0.05)
@@ -98,14 +128,17 @@ def create_visualization_grid(
             ax.set_ylabel(row_names[2], fontsize=10)
         ax.axis('off')
         
-        # Row 3: Vulnerability map
+        # Row 3: Vulnerability map (consistent scaling across all columns)
         ax = fig.add_subplot(gs[3, col_idx])
-        vuln_map = _prep_map(vuln_maps, img_type)
+        vuln_map = vuln_maps_prepared.get(img_type)
         if vuln_map is not None:
             if detector_name == "WaveRep":
-                ax.imshow(colorize_cam(vuln_map))
+                ax.imshow(colorize_cam(vuln_map.copy()))
             else:
-                ax.imshow(vuln_map, cmap='jet', vmin=0, vmax=1)
+                # Use consistent absolute scaling: 0 = dark blue, vuln_vmax = dark red
+                # Clip to [0, vuln_vmax] and normalize for display
+                vuln_display = np.clip(vuln_map, 0, vuln_vmax) / vuln_vmax
+                ax.imshow(vuln_display, cmap='hot', vmin=0, vmax=1)
         else:
             ax.imshow(np.zeros((10, 10)), cmap='gray')
         if col_idx == 0:
@@ -165,6 +198,41 @@ def to_numpy_2d(arr: Any, target_size: Tuple[int, int]) -> np.ndarray:
         arr = np.zeros_like(arr)
     
     # Resize to target size if needed
+    if arr.shape != target_size:
+        arr = cv2.resize(arr, (target_size[1], target_size[0]), interpolation=cv2.INTER_CUBIC)
+    
+    return arr.astype(np.float32)
+
+
+def to_numpy_2d_raw(arr: Any, target_size: Tuple[int, int]) -> np.ndarray:
+    """
+    Convert array to 2D float32 numpy array WITHOUT normalization.
+    Used for vulnerability maps where we need consistent absolute scaling.
+    """
+    # Handle torch tensors
+    if hasattr(arr, 'detach'):
+        arr = arr.detach().cpu().numpy()
+    
+    arr = np.asarray(arr, dtype=np.float32)
+    
+    # Squeeze extra dimensions
+    while arr.ndim > 2:
+        if arr.shape[0] == 1:
+            arr = arr[0]
+        elif arr.shape[-1] == 1:
+            arr = arr[..., 0]
+        elif arr.shape[-1] == 3:
+            # RGB to grayscale
+            arr = 0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]
+        elif arr.shape[0] == 3:
+            arr = 0.299 * arr[0] + 0.587 * arr[1] + 0.114 * arr[2]
+        else:
+            arr = arr[0]
+    
+    if arr.ndim != 2:
+        raise ValueError(f"Could not convert to 2D array, got shape {arr.shape}")
+    
+    # Resize to target size if needed (no normalization)
     if arr.shape != target_size:
         arr = cv2.resize(arr, (target_size[1], target_size[0]), interpolation=cv2.INTER_CUBIC)
     

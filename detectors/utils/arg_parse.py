@@ -108,6 +108,12 @@ def parse_arguments() -> argparse.Namespace:
         default=150,
         help='DPI for saved visualization images (default: 150)',
     )
+    parser.add_argument(
+        '--limit',
+        type=int,
+        default=None,
+        help='Limit processing to first N samples (for testing). Default: process all.',
+    )
     
     args = parser.parse_args()
     

@@ -222,6 +222,12 @@ def main():
     
     # Sort samples for deterministic ordering
     samples.sort(key=lambda s: s.filename)
+    
+    # Apply limit if specified (for testing)
+    if args.limit is not None and args.limit > 0:
+        samples = samples[:args.limit]
+        logger.info(f"⚠ Limited to first {args.limit} sample(s) for testing")
+    
     logger.info(f"✓ {len(samples)} samples ready for processing")
     
     # Normalize image_types to lowercase

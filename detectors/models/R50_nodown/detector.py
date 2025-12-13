@@ -129,7 +129,7 @@ class R50NoDownDetector(BaseDetector):
                 targets=[ClassifierOutputTarget(target_idx)],
             )
         
-        grayscale_cam = grayscale_cam.detach().cpu()
+        
         cam_map = grayscale_cam[0, :].astype(np.float32)  # NEW
         
         # Resize CAM map to requested map_size
