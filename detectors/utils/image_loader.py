@@ -34,7 +34,7 @@ def find_file_with_extensions(base_path: str) -> Optional[str]:
     return None
 
 
-def load_image(path: str) -> np.ndarray:
+def load_image(path: str) -> Image.Image:
     """
     Load an image as RGB numpy array.
 
@@ -52,7 +52,7 @@ def load_image(path: str) -> np.ndarray:
         raise FileNotFoundError(f"Image file not found: {path}")
     
     img = Image.open(path).convert('RGB')
-    return np.array(img)
+    return img
 
 
 def load_mask(path: str) -> np.ndarray:

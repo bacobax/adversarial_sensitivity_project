@@ -287,5 +287,5 @@ class AnomalyOVDetector(BaseDetector):
                     return_anomaly_map=True,
                     anomaly_map_size=anomaly_map_size,
                 )
-        
-        return anomaly_map
+
+        return anomaly_map.detach().cpu()

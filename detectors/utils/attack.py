@@ -108,7 +108,7 @@ def get_or_generate_attacked_image(
         Attacked RGB image as np.ndarray (H, W, 3) uint8
     """
     if os.path.exists(cache_path) and not overwrite:
-        return load_image(cache_path)
+        return np.array(load_image(cache_path))
     
     # Generate attacked image
     adv_image = detector.generate_adversarial(image, attack_type)
