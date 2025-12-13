@@ -114,6 +114,13 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
         help='Limit processing to first N samples (for testing). Default: process all.',
     )
+
+    parser.add_argument(
+        '--attack_processes',
+        type=int,
+        default=None,
+        help='Number of parallel processes to use across attacks (default: number of attacks).',
+    )
     
     args = parser.parse_args()
     
@@ -194,6 +201,11 @@ def validate_arguments(args: argparse.Namespace) -> None:
     for topk in args.topk_percent:
         if not (0 < topk <= 100):
             errors.append(f"topk_percent must be in (0, 100], got: {topk}")
+
+    # Validate attack_processes
+    if hasattr(args, 'attack_processes') and args.attack_processes is not None:
+        if args.attack_processes <= 0:
+            errors.append(f"attack_processes must be a positive integer, got: {args.attack_processes}")
     
     if errors:
         for error in errors:
