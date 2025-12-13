@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Sequence, Union
 
 import numpy as np
 import torch
@@ -12,6 +12,7 @@ def _make_batch_predict_fn(forward):
     def batch_predict(images: List[Image.Image]) -> np.ndarray:
         with torch.no_grad():
             logits = forward(images)  # make sure model returns raw logits
+            logits = logits.detach().cpu()
         # SPECIALIZED: treat last logit as "fake" score and map to 2-class probs via sigmoid
         if logits.ndim == 1:
             last = logits
@@ -35,6 +36,7 @@ def lime_explain(
     num_samples: int = 150,
     n_segments: int = 24,
     batch_size: int = 64,
+    fixed_segments: Optional[Union[np.ndarray, Sequence[np.ndarray]]] = None,
 ) -> torch.Tensor:
     """
     Compute LIME masks for a batch tensor normalized with ImageNet stats.
@@ -46,6 +48,15 @@ def lime_explain(
     # Prepare predictor and explainer
     batch_predict = _make_batch_predict_fn(logits_fn)
     explainer = lime_image.LimeImageExplainer()
+    
+    # Fast SLIC segmentation to reduce superpixels and speed up
+    try:
+        from skimage.segmentation import slic
+
+        def default_segmentation_fn(x):
+            return slic(x, n_segments=n_segments, compactness=20, start_label=0)
+    except Exception:
+        default_segmentation_fn = None  # fall back to default
     
     # Determine which class to visualize
     if class_idx is None:
@@ -64,15 +75,19 @@ def lime_explain(
         single_image = True
     
     cams: List[torch.Tensor] = []
-    orig_img = None
     for i, img in tqdm(enumerate(images), leave=False):
-        def segmentation_fn(_):  # FIXME !!! assumes images are in pairs (original, adversarial)
-            nonlocal orig_img
-            if i % 2 == 0:
-                orig_img = img
-            im = orig_img
-            return slic(im, n_segments=n_segments, compactness=20, start_label=0)
-        
+        if fixed_segments is None:
+            segmentation_fn = default_segmentation_fn
+        else:
+            seg_i = fixed_segments[i] if isinstance(fixed_segments, (list, tuple)) else fixed_segments
+            if seg_i.shape != img.shape[:2]:
+                raise ValueError(
+                    f"fixed_segments shape {seg_i.shape} must match image spatial shape {img.shape[:2]}"
+                )
+
+            def segmentation_fn(_x, _seg=seg_i):
+                return _seg
+
         explanation = explainer.explain_instance(
             image=img,
             classifier_fn=batch_predict,

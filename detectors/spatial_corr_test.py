@@ -41,19 +41,24 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import torch
+from skimage.segmentation import slic
 from tqdm import tqdm
 
-from support.detect_utils import get_device, load_np_image
-from utils import arg_parse, attack, evaluate, image_loader
+from support.base_detector import BaseDetector
+# from support.detect_utils import get_device
+from utils import arg_parse, attack, evaluate, image_loader, visualize
 from utils.detector_loader import load_detector
-from utils.detector_wrapper import DetectorWrapper
 from utils.logging import log_configuration, logger
 from utils.sample_paths import SamplePaths
+from utils.image_loader import load_image
+
+LIME_BATCH_SIZE = 64
+LIME_NUM_SAMPLES = 150
 
 
 def process_sample(
     sample: SamplePaths,
-    detector: DetectorWrapper,
+    detector: BaseDetector,
     attack_type: str,
     image_types: List[str],
     root_dataset: str,
@@ -66,7 +71,7 @@ def process_sample(
     
     Args:
         sample: Sample paths
-        detector: Detector wrapper
+        detector: Base Detector
         attack_type: Attack type
         image_types: List of image types to process
         root_dataset: Root dataset path
@@ -95,7 +100,7 @@ def process_sample(
         if img_type == 'real':
             # Still load for visualization
             try:
-                vis_data['images']['real'] = load_np_image(sample.real)
+                vis_data['images']['real'] = np.array(load_image(sample.real))
             except:
                 pass
             continue
@@ -114,24 +119,25 @@ def process_sample(
             continue
         
         # Load image
-        image = load_np_image(img_path)
-        vis_data['images'][img_type] = image
+        image_pil = load_image(img_path)
+        image_np = np.array(image_pil)
+        vis_data['images'][img_type] = image_np
         
         # Load/compute ground truth mask
         if img_type == 'samecat':
             gt_mask = image_loader.load_mask(mask_path)
         else:  # diffcat
-            gt_mask = image_loader.bbox_to_mask(mask_path, image.shape[:2])
+            gt_mask = image_loader.bbox_to_mask(mask_path, image_np.shape[:2])
         vis_data['gt_masks'][img_type] = gt_mask
         
-        # Compute or get cached original explanation
-        cache_key = (detector.name, img_type, sample.filename)
-        if cache_key in exp_cache:
-            exp_orig = exp_cache[cache_key]
-        else:
-            exp_orig = detector.detector.explain(image)
-            exp_cache[cache_key] = exp_orig
-        vis_data['exp_orig'][img_type] = exp_orig
+        kwargs = {}
+        if detector.name == 'WaveRep':
+            fixed_segments = slic(image_np, n_segments=24, compactness=20, start_label=0)
+            kwargs = {
+                'batch_size': LIME_BATCH_SIZE,
+                'num_samples': LIME_NUM_SAMPLES,
+                'fixed_segments': fixed_segments,
+            }
         
         # Get or generate attacked image
         attack_cache_path = attack.get_attack_cache_path(
@@ -139,16 +145,23 @@ def process_sample(
         )
         adv_image = attack.get_or_generate_attacked_image(
             detector=detector,
-            image=image,
+            image=image_pil,
             attack_type=attack_type,
             cache_path=attack_cache_path,
             overwrite=overwrite_attacks,
-            filename=sample.filename,
-            image_type=img_type,
         )
         
+        # Compute or get cached original explanation
+        cache_key = (detector.name, img_type, sample.filename)
+        if cache_key in exp_cache:
+            exp_orig = exp_cache[cache_key]
+        else:
+            exp_orig = detector.explain(image_np, **kwargs)
+            exp_cache[cache_key] = exp_orig
+        vis_data['exp_orig'][img_type] = exp_orig
+        
         # Compute explanation on attacked image
-        exp_adv = detector.detector.explain(adv_image)
+        exp_adv = detector.explain(adv_image, **kwargs)
         vis_data['exp_adv'][img_type] = exp_adv
         
         # Compute vulnerability map
@@ -309,7 +322,7 @@ def main():
                         vis_path = os.path.join(vis_output, f"{base_name}_grid.png")
                         
                         try:
-                            evaluate.create_visualization_grid(
+                            visualize.create_visualization_grid(
                                 images=vis_data['images'],
                                 exp_orig=vis_data['exp_orig'],
                                 exp_adv=vis_data['exp_adv'],
@@ -350,7 +363,7 @@ def main():
                 logger.info(f"  Averages: {vuln_aggregator.summary_str()}")
             else:
                 logger.warning(f"No vulnerability metrics collected for {attack_type}")
-        
+            
         # Save explanation metrics CSV (once per detector, attack-independent)
         logger.info(f"\n{'=' * 60}")
         logger.info(f"Saving explanation metrics for {detector_name}...")

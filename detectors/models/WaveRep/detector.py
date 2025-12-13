@@ -1,13 +1,11 @@
 import os
-from typing import Optional
+from typing import Optional, Sequence, Union
 
 import numpy as np
 import timm
 import torch
-import torchvision.transforms as transforms
-from torch import nn
 
-from support.base_detector import BaseDetector, prepare_batch
+from support.base_detector import BaseDetector
 from support.lime_explain import lime_explain
 
 DETECTOR_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,17 +15,13 @@ class WaveRepDetector(BaseDetector):
     name = 'WaveRep'
     
     supports_explainability = True
+    supports_adversarial = True
     
     def __init__(self, device: Optional[torch.device] = None):
         super().__init__(device=device)
-        self.transform = None
         self.cropping = 512
         self.arc = 'vit_base_patch14_reg4_dinov2.lvd142m'
-        # Inference knobs
         self.use_amp = True  # CUDA autocast
-        self._gradcam_target_layer: Optional[nn.Module] = None
-        # cache for attention rollout (not strictly required but handy)
-        self._attn_hook_handles = []
     
     @staticmethod
     def _default_weights() -> str:
@@ -40,7 +34,6 @@ class WaveRepDetector(BaseDetector):
         weights = model_id if model_id else self._default_weights()
         if not os.path.exists(weights):
             raise FileNotFoundError(f"WaveRep weights not found: {weights}")
-        self.transform = self.create_transform(self.cropping)
         self.model = self.create_model(weights, self.arc, self.cropping, device)
         self.model.eval()
     
@@ -62,24 +55,26 @@ class WaveRepDetector(BaseDetector):
     
     def forward(self, images) -> float:
         assert self.model is not None, "Model not loaded"
-        assert self.transform is not None, "Transform not initialized"
         
-        batch = prepare_batch(images, self.device, self.transform)
+        if not isinstance(images, torch.Tensor):
+            batch = self.prepare_batch(images, self.transform)
+        else:
+            batch = images
         
-        with torch.no_grad():
-            if self.device.type == 'cuda' and self.use_amp:
-                from torch.amp import autocast
-                with autocast('cuda'):
-                    logits = self.model(batch)[:, -1]
-            else:
+        if self.device.type == 'cuda' and self.use_amp:
+            from torch.amp import autocast
+            with autocast('cuda'):
                 logits = self.model(batch)[:, -1]
-        return logits.detach().cpu()
+        else:
+            logits = self.model(batch)[:, -1]
+        return logits
     
     def explain(
         self,
         images: np.ndarray,
-        batch_size: int = 80,
+        batch_size: int = 64,
         num_samples: int = 150,
+        fixed_segments: Optional[Union[np.ndarray, Sequence[np.ndarray]]] = None,
     ) -> np.ndarray:
         """
         Compute explainability maps for a batch of already-normalized images.
@@ -93,11 +88,12 @@ class WaveRepDetector(BaseDetector):
             cam: (B, 1, H, W) maps in [0, 1].
             logits: (B, K) raw logits (no sigmoid).
         """
-    
         cam = lime_explain(
             logits_fn=self.forward,
             images=images,
             batch_size=batch_size,
             num_samples=num_samples,
+            fixed_segments=fixed_segments,
         )
         return cam.detach().cpu().numpy()
+    

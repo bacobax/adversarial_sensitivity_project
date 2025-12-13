@@ -1,57 +1,4 @@
-import json
-import os
-
-import numpy as np
 import torch
-from PIL import Image
-
-
-def load_np_image(image_path) -> np.ndarray:
-    """Load and preprocess an image for detection.
-    
-    Args:
-        image_path (str): Path to the image file
-        size (int): Size to resize the image to (default: 224)
-        
-    Returns:
-        torch.Tensor: Preprocessed image tensor
-        PIL.Image: Original loaded image
-    """
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Image not found: {image_path}")
-    
-    image = np.array(Image.open(image_path).convert('RGB'))
-    return image
-
-
-def format_result(prediction, confidence, elapsed_time):
-    """Format detection results.
-    
-    Args:
-        prediction (int): 'real' or 'fake'
-        confidence (float): Confidence score (0-1)
-        elapsed_time (float): Detection time in seconds
-        
-    Returns:
-        dict: Formatted results
-    """
-    return {
-        "prediction": int(prediction),
-        "confidence": float(confidence),
-        "elapsed_time": float(elapsed_time),
-    }
-
-
-def save_result(result, output_path):
-    """Save detection result to JSON file.
-    
-    Args:
-        result (dict): Detection result to save
-        output_path (str): Path to save the JSON file
-    """
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, 'w') as f:
-        json.dump(result, f, indent=2)
 
 
 def get_device():
@@ -61,19 +8,3 @@ def get_device():
         torch.device: Device to use for computation
     """
     return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-
-def load_model(model_path, device):
-    """Load a PyTorch model from checkpoint.
-    
-    Args:
-        model_path (str): Path to model checkpoint
-        device (torch.device): Device to load the model to
-        
-    Returns:
-        dict: Loaded checkpoint
-    """
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
-    
-    return torch.load(model_path, map_location=device)

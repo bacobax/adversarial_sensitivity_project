@@ -3,8 +3,8 @@ import sys
 
 import torch
 
+from support.base_detector import BaseDetector
 from utils.consts import DETECTOR_MAP, SCRIPT_DIR
-from utils.detector_wrapper import DetectorWrapper
 from utils.logging import logger
 
 
@@ -40,7 +40,7 @@ def load_detector(
     detector_name: str,
     weights_path: str,
     device: torch.device,
-) -> DetectorWrapper:
+) -> BaseDetector:
     """
     Load a detector with its weights and wrap in unified interface.
 
@@ -62,22 +62,5 @@ def load_detector(
     detector.load(weights_path)
     logger.info(f"  Model loaded successfully!")
     
-    # Verify required capabilities
-    logger.info(f"  Verifying detector capabilities...")
-    if not (hasattr(detector, 'predict_with_map') or
-            hasattr(detector, '_compute_explanation_map')):
-        raise ValueError(
-            f"Detector {detector_name} does not support explanation maps",
-        )
-    
-    if not (hasattr(detector, 'generate_adversarial') or
-            hasattr(detector, '_generate_adversarial_image')):
-        raise ValueError(
-            f"Detector {detector_name} does not support adversarial attacks",
-        )
-    
     logger.info(f"  ✓ Detector {detector_name} ready")
-    return DetectorWrapper(detector=detector)
-
-
-
+    return detector
