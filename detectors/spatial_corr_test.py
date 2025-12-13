@@ -39,8 +39,10 @@ Usage:
 import os
 from typing import Any, Dict, List, Tuple
 
+import cv2
 import numpy as np
 import torch
+from sklearn.metrics import average_precision_score
 from skimage.segmentation import slic
 from tqdm import tqdm
 
@@ -72,6 +74,7 @@ def process_sample(
     topk_percents: List[float],
     overwrite_attacks: bool,
     cache_paths: Dict[Tuple[str, str], str],
+    results: Dict[str, Dict[str, List[float]]],
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], Dict[str, Any]]:
     """
     Process a single sample for all requested image types.
@@ -85,6 +88,7 @@ def process_sample(
         topk_percents: List of top-k percentages
         overwrite_attacks: Whether to overwrite cached attacks
         cache_paths: Cache for original explanation maps
+        results: Dict to store results
 
     Returns:
         Tuple of:
@@ -196,6 +200,25 @@ def process_sample(
         # Vulnerability metrics: vuln_map vs gt_mask
         vuln_metrics = evaluate.compute_metrics(vuln_map, gt_mask, topk_percents)
         vulnerability_metrics[img_type] = vuln_metrics
+        
+        vuln = exp_orig_norm + np.abs(-exp_adv_norm)
+        orig = np.clip(exp_orig_norm, 0, None) ** 2
+        vuln = np.clip(vuln, 0, None) ** 2
+        
+        mask = np.array(cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE), dtype=bool)
+        
+        mass_in_mask_orig = np.sum(orig[mask]) / (np.sum(orig) + eps)
+        mass_in_mask_vuln = np.sum(vuln[mask]) / (np.sum(vuln) + eps)
+        
+        flat_mask = mask.reshape(-1).astype(np.uint8)
+        if flat_mask.min() != flat_mask.max():
+            ap_orig = float(average_precision_score(flat_mask, orig.reshape(-1)))
+            ap_vuln = float(average_precision_score(flat_mask, vuln.reshape(-1)))
+            results['ap_orig'][img_type].append(ap_orig)
+            results['ap_vuln'][img_type].append(ap_vuln)
+    
+        results['mim_orig'][img_type].append(mass_in_mask_orig)
+        results['mim_vuln'][img_type].append(mass_in_mask_vuln)
     
     return explanation_metrics, vulnerability_metrics, vis_data
 
@@ -286,6 +309,13 @@ def main():
             pt_output = os.path.join(detector_output, 'maps')
             os.makedirs(pt_output, exist_ok=True)
             
+            results = {
+                'ap_orig': {t: [] for t in image_types},
+                'ap_vuln': {t: [] for t in image_types},
+                'mim_orig': {t: [] for t in image_types},
+                'mim_vuln': {t: [] for t in image_types},
+            }
+            
             # Process samples
             pbar = tqdm(
                 samples,
@@ -304,7 +334,7 @@ def main():
                     cache_paths[(attack_type, img_type)] = os.path.join(pt_output, f"{base_name}_{attack_type}_{img_type}.npy")
                 
                 try:
-                    exp_metrics, vuln_metrics, vis_data = process_sample(
+                    exp_metrics, vuln_metrics, vis_data, = process_sample(
                         sample=sample,
                         detector=detector,
                         attack_type=attack_type,
@@ -313,6 +343,7 @@ def main():
                         topk_percents=args.topk_percent,
                         overwrite_attacks=args.overwrite_attacks,
                         cache_paths=cache_paths,
+                        results=results
                     )
                     
                     # Update explanation metrics (only once per sample/image_type)
@@ -386,6 +417,15 @@ def main():
                 logger.info(f"  Averages: {vuln_aggregator.summary_str()}")
             else:
                 logger.warning(f"No vulnerability metrics collected for {attack_type}")
+            
+                print()
+            for img_type in image_types:
+                print(img_type)
+                print('*'*80)
+                print(f'orig: ap={np.mean(results['ap_orig'][img_type]):.4f} mim={np.mean(results['mim_orig'][img_type]):.4f}')
+                print(f'vuln: ap={np.mean(results['ap_vuln'][img_type]):.4f} mim={np.mean(results['mim_vuln'][img_type]):.4f}')
+                print('*'*80)
+                print()
         
         # Save explanation metrics CSV (once per detector, attack-independent)
         logger.info(f"\n{'=' * 60}")
