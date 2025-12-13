@@ -71,7 +71,7 @@ def process_sample(
     root_dataset: str,
     topk_percents: List[float],
     overwrite_attacks: bool,
-    exp_cache: Dict[str, np.ndarray],
+    cache_paths: Dict[Tuple[str, str], str],
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], Dict[str, Any]]:
     """
     Process a single sample for all requested image types.
@@ -84,7 +84,7 @@ def process_sample(
         root_dataset: Root dataset path
         topk_percents: List of top-k percentages
         overwrite_attacks: Whether to overwrite cached attacks
-        exp_cache: Cache for original explanation maps
+        cache_paths: Cache for original explanation maps
     
     Returns:
         Tuple of:
@@ -159,16 +159,21 @@ def process_sample(
         )
         
         # Compute or get cached original explanation
-        cache_key = (detector.name, img_type, sample.filename)
-        if cache_key in exp_cache:
-            exp_orig = exp_cache[cache_key]
+        cache_path_orig = cache_paths[('orig', img_type)]
+        if os.path.exists(cache_path_orig):
+            exp_orig = np.load(cache_path_orig)
         else:
             exp_orig = to_numpy(detector.explain(image_np, **kwargs))
-            exp_cache[cache_key] = exp_orig
+            np.save(cache_path_orig, exp_orig)
         vis_data['exp_orig'][img_type] = exp_orig
         
         # Compute explanation on attacked image
-        exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
+        cache_path_adv = cache_paths[(attack_type, img_type)]
+        if os.path.exists(cache_path_adv):
+            exp_adv = np.load(cache_path_adv)
+        else:
+            exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
+            np.save(cache_path_adv, exp_adv)
         vis_data['exp_adv'][img_type] = exp_adv
         
         # Compute vulnerability map
@@ -261,8 +266,6 @@ def main():
         exp_aggregator = evaluate.MetricsAggregator()
         exp_processed = set()  # Track which (filename, image_type) have been computed
         
-        # Cache for original explanation maps
-        exp_cache: Dict[str, np.ndarray] = {}
         
         # Process each attack type
         for attack_idx, attack_type in enumerate(attacks, 1):
@@ -281,6 +284,8 @@ def main():
             os.makedirs(attack_output, exist_ok=True)
             vis_output = os.path.join(detector_output, 'vis', attack_type)
             os.makedirs(vis_output, exist_ok=True)
+            pt_output = os.path.join(detector_output, 'maps')
+            os.makedirs(pt_output, exist_ok=True)
             
             # Process samples
             pbar = tqdm(
@@ -292,6 +297,13 @@ def main():
             for sample in pbar:
                 # Update progress bar with current file
                 pbar.set_postfix_str(f"{sample.filename[:30]}...", refresh=True)
+                base_name = os.path.splitext(sample.filename)[0]
+                
+                cache_paths = {}
+                for img_type in image_types:
+                    cache_paths[('orig', img_type)] = os.path.join(pt_output, f"{base_name}_orig_{img_type}.npy")
+                    cache_paths[(attack_type, img_type)] = os.path.join(pt_output, f"{base_name}_{attack_type}_{img_type}.npy")
+                
                 try:
                     exp_metrics, vuln_metrics, vis_data = process_sample(
                         sample=sample,
@@ -301,7 +313,7 @@ def main():
                         root_dataset=args.root_dataset,
                         topk_percents=args.topk_percent,
                         overwrite_attacks=args.overwrite_attacks,
-                        exp_cache=exp_cache,
+                        cache_paths=cache_paths,
                     )
                     
                     # Update explanation metrics (only once per sample/image_type)
@@ -331,7 +343,6 @@ def main():
                     # Generate visualization if within limit
                     if vis_count < args.max_visualizations:
                         pbar.set_postfix_str(f"Generating visualization {vis_count + 1}/{args.max_visualizations}", refresh=True)
-                        base_name = os.path.splitext(sample.filename)[0]
                         vis_path = os.path.join(vis_output, f"{base_name}_grid.png")
                         
                         try:
