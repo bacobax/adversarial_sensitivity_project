@@ -4,8 +4,6 @@ from typing import Any, Dict, Tuple
 import cv2
 import numpy as np
 
-from visualize_explain import colorize_cam
-
 
 def create_visualization_grid(
     images: Dict[str, np.ndarray],

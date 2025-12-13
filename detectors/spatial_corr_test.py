@@ -45,7 +45,7 @@ from skimage.segmentation import slic
 from tqdm import tqdm
 
 from support.base_detector import BaseDetector
-# from support.detect_utils import get_device
+from support.detect_utils import get_device
 from utils import arg_parse, attack, evaluate, image_loader, visualize
 from utils.detector_loader import load_detector
 from utils.logging import log_configuration, logger
