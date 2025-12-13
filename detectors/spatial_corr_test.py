@@ -205,12 +205,12 @@ def process_sample(
         orig = np.clip(exp_orig_norm, 0, None) ** 2
         vuln = np.clip(vuln, 0, None) ** 2
         
-        mask = np.array(cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE), dtype=bool)
-        
+        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         if orig.shape != mask.shape:
             mask = cv2.resize(mask, (orig.shape[1], orig.shape[0]), interpolation=cv2.INTER_AREA)
         if vuln.shape != mask.shape:
             mask = cv2.resize(mask, (vuln.shape[1], vuln.shape[0]), interpolation=cv2.INTER_AREA)
+        mask = np.array(mask, dtype=bool)
         
         mass_in_mask_orig = np.sum(orig[mask]) / (np.sum(orig) + eps)
         mass_in_mask_vuln = np.sum(vuln[mask]) / (np.sum(vuln) + eps)
