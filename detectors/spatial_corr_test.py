@@ -37,10 +37,8 @@ Usage:
 """
 
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
-import concurrent.futures
-import multiprocessing as mp
 import numpy as np
 import torch
 from skimage.segmentation import slic
@@ -77,7 +75,7 @@ def process_sample(
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], Dict[str, Any]]:
     """
     Process a single sample for all requested image types.
-    
+
     Args:
         sample: Sample paths
         detector: Base Detector
@@ -87,7 +85,7 @@ def process_sample(
         topk_percents: List of top-k percentages
         overwrite_attacks: Whether to overwrite cached attacks
         cache_paths: Cache for original explanation maps
-    
+
     Returns:
         Tuple of:
             - explanation_metrics: Dict[image_type, metrics_dict]
@@ -202,171 +200,6 @@ def process_sample(
     return explanation_metrics, vulnerability_metrics, vis_data
 
 
-def _precompute_explanations_for_detector(
-    *,
-    detector: BaseDetector,
-    samples: List[SamplePaths],
-    image_types: List[str],
-    topk_percents: List[float],
-    pt_output: str,
-) -> evaluate.MetricsAggregator:
-    exp_aggregator = evaluate.MetricsAggregator()
-    exp_processed = set()
-
-    pbar = tqdm(
-        samples,
-        desc=f"Precomputing explanations ({detector.name})",
-        unit="sample",
-        leave=True,
-    )
-    for sample in pbar:
-        pbar.set_postfix_str(f"{sample.filename[:30]}...", refresh=True)
-        base_name = os.path.splitext(sample.filename)[0]
-
-        cache_paths: Dict[Tuple[str, str], str] = {}
-        for img_type in image_types:
-            cache_paths[('orig', img_type)] = os.path.join(pt_output, f"{base_name}_orig_{img_type}.npy")
-            cache_paths[('__noop__', img_type)] = os.path.join(pt_output, f"{base_name}___noop___{img_type}.npy")
-
-        try:
-            exp_metrics, _, _ = process_sample(
-                sample=sample,
-                detector=detector,
-                attack_type='__noop__',
-                image_types=image_types,
-                root_dataset='',
-                topk_percents=topk_percents,
-                overwrite_attacks=False,
-                cache_paths=cache_paths,
-            )
-        except Exception:
-            continue
-
-        for img_type, metrics in exp_metrics.items():
-            key = (sample.filename, img_type)
-            if key in exp_processed:
-                continue
-            metadata = {
-                'filename': sample.filename,
-                'image_type': img_type,
-            }
-            if len(topk_percents) > 1:
-                metadata['topk_percent'] = topk_percents[0]
-            exp_aggregator.update(metrics, metadata=metadata)
-            exp_processed.add(key)
-
-    pbar.close()
-    return exp_aggregator
-
-
-def _run_single_attack_process(
-    *,
-    detector_name: str,
-    weights_path: Optional[str],
-    device_str: str,
-    attack_type: str,
-    samples: List[SamplePaths],
-    image_types: List[str],
-    root_dataset: str,
-    topk_percents: List[float],
-    overwrite_attacks: bool,
-    output_dir: str,
-    max_visualizations: int,
-    dpi: int,
-) -> Tuple[str, int, int]:
-    device = torch.device(device_str)
-    detector = load_detector(detector_name, weights_path, device)
-
-    detector_output = os.path.join(output_dir, detector_name)
-    os.makedirs(detector_output, exist_ok=True)
-
-    vuln_aggregator = evaluate.MetricsAggregator()
-    vis_count = 0
-
-    attack_output = os.path.join(detector_output, attack_type)
-    os.makedirs(attack_output, exist_ok=True)
-    vis_output = os.path.join(detector_output, 'vis', attack_type)
-    os.makedirs(vis_output, exist_ok=True)
-    pt_output = os.path.join(detector_output, 'maps')
-    os.makedirs(pt_output, exist_ok=True)
-
-    pbar = tqdm(
-        samples,
-        desc=f"Processing {detector_name}/{attack_type}",
-        unit="sample",
-        leave=True,
-    )
-    for sample in pbar:
-        pbar.set_postfix_str(f"{sample.filename[:30]}...", refresh=True)
-        base_name = os.path.splitext(sample.filename)[0]
-
-        cache_paths: Dict[Tuple[str, str], str] = {}
-        for img_type in image_types:
-            cache_paths[('orig', img_type)] = os.path.join(pt_output, f"{base_name}_orig_{img_type}.npy")
-            cache_paths[(attack_type, img_type)] = os.path.join(pt_output, f"{base_name}_{attack_type}_{img_type}.npy")
-
-        try:
-            _, vuln_metrics, vis_data = process_sample(
-                sample=sample,
-                detector=detector,
-                attack_type=attack_type,
-                image_types=image_types,
-                root_dataset=root_dataset,
-                topk_percents=topk_percents,
-                overwrite_attacks=overwrite_attacks,
-                cache_paths=cache_paths,
-            )
-
-            for img_type, metrics in vuln_metrics.items():
-                metadata = {
-                    'filename': sample.filename,
-                    'image_type': img_type,
-                    'attack_type': attack_type,
-                }
-                if len(topk_percents) > 1:
-                    metadata['topk_percent'] = topk_percents[0]
-                vuln_aggregator.update(metrics, metadata=metadata)
-
-            if vis_count < max_visualizations:
-                pbar.set_postfix_str(
-                    f"Generating visualization {vis_count + 1}/{max_visualizations}",
-                    refresh=True,
-                )
-                vis_path = os.path.join(vis_output, f"{base_name}_grid.png")
-                try:
-                    visualize.create_visualization_grid(
-                        images=vis_data['images'],
-                        exp_orig=vis_data['exp_orig'],
-                        exp_adv=vis_data['exp_adv'],
-                        vuln_maps=vis_data['vuln_maps'],
-                        gt_masks=vis_data['gt_masks'],
-                        filename=sample.filename,
-                        attack_type=attack_type,
-                        output_path=vis_path,
-                        dpi=dpi,
-                        detector_name=detector.name,
-                    )
-                    vis_count += 1
-                except Exception as e:
-                    logger.warning(f"Visualization failed for {sample.filename}: {e}")
-
-        except Exception as e:
-            pbar.set_postfix_str(f"ERROR: {str(e)[:30]}", refresh=True)
-            logger.error(f"Failed to process {sample.filename}: {e}")
-            continue
-
-    pbar.close()
-
-    if len(vuln_aggregator) > 0:
-        vuln_csv = os.path.join(attack_output, "metrics_vulnerability.csv")
-        vuln_aggregator.to_csv(vuln_csv)
-        logger.info(f"✓ Vulnerability metrics saved to: {vuln_csv}")
-    else:
-        logger.warning(f"No vulnerability metrics collected for {attack_type}")
-
-    return attack_type, len(vuln_aggregator), vis_count
-
-
 def main():
     """Main entry point."""
     # Parse arguments
@@ -418,25 +251,142 @@ def main():
         logger.info(f"Processing detector: {detector_name}")
         logger.info(f"{'=' * 60}")
         
+        # Load detector
         try:
-            detector = load_detector(detector_name, weights_dict.get(detector_name), device)
+            detector = load_detector(detector_name, weights_dict[detector_name], device)
         except Exception as e:
             logger.error(f"Failed to load detector {detector_name}: {e}")
             continue
-
+        
+        # Create output directory for this detector
         detector_output = os.path.join(args.output_dir, detector_name)
         os.makedirs(detector_output, exist_ok=True)
-        pt_output = os.path.join(detector_output, 'maps')
-        os.makedirs(pt_output, exist_ok=True)
-
-        exp_aggregator = _precompute_explanations_for_detector(
-            detector=detector,
-            samples=samples,
-            image_types=image_types,
-            topk_percents=args.topk_percent,
-            pt_output=pt_output,
-        )
-
+        
+        # Explanation metrics aggregator (computed once, attack-independent)
+        exp_aggregator = evaluate.MetricsAggregator()
+        exp_processed = set()  # Track which (filename, image_type) have been computed
+        
+        # Process each attack type
+        for attack_idx, attack_type in enumerate(attacks, 1):
+            logger.info(f"\n--- [{attack_idx}/{len(attacks)}] Processing attack: {attack_type.upper()} ---")
+            logger.info(f"Samples to process: {len(samples)}")
+            logger.info(f"Image types: {', '.join(image_types)}")
+            
+            # Vulnerability metrics aggregator (per attack)
+            vuln_aggregator = evaluate.MetricsAggregator()
+            
+            # Visualization counter
+            vis_count = 0
+            
+            # Create attack-specific output directory
+            attack_output = os.path.join(detector_output, attack_type)
+            os.makedirs(attack_output, exist_ok=True)
+            vis_output = os.path.join(detector_output, 'vis', attack_type)
+            os.makedirs(vis_output, exist_ok=True)
+            pt_output = os.path.join(detector_output, 'maps')
+            os.makedirs(pt_output, exist_ok=True)
+            
+            # Process samples
+            pbar = tqdm(
+                samples,
+                desc=f"Processing {detector_name}/{attack_type}",
+                unit="sample",
+                leave=True,
+            )
+            for sample in pbar:
+                # Update progress bar with current file
+                pbar.set_postfix_str(f"{sample.filename[:30]}...", refresh=True)
+                base_name = os.path.splitext(sample.filename)[0]
+                
+                cache_paths = {}
+                for img_type in image_types:
+                    cache_paths[('orig', img_type)] = os.path.join(pt_output, f"{base_name}_orig_{img_type}.npy")
+                    cache_paths[(attack_type, img_type)] = os.path.join(pt_output, f"{base_name}_{attack_type}_{img_type}.npy")
+                
+                try:
+                    exp_metrics, vuln_metrics, vis_data = process_sample(
+                        sample=sample,
+                        detector=detector,
+                        attack_type=attack_type,
+                        image_types=image_types,
+                        root_dataset=args.root_dataset,
+                        topk_percents=args.topk_percent,
+                        overwrite_attacks=args.overwrite_attacks,
+                        cache_paths=cache_paths,
+                    )
+                    
+                    # Update explanation metrics (only once per sample/image_type)
+                    for img_type, metrics in exp_metrics.items():
+                        key = (sample.filename, img_type)
+                        if key not in exp_processed:
+                            metadata = {
+                                'filename': sample.filename,
+                                'image_type': img_type,
+                            }
+                            if len(args.topk_percent) > 1:
+                                metadata['topk_percent'] = args.topk_percent[0]
+                            exp_aggregator.update(metrics, metadata=metadata)
+                            exp_processed.add(key)
+                    
+                    # Update vulnerability metrics
+                    for img_type, metrics in vuln_metrics.items():
+                        metadata = {
+                            'filename': sample.filename,
+                            'image_type': img_type,
+                            'attack_type': attack_type,
+                        }
+                        if len(args.topk_percent) > 1:
+                            metadata['topk_percent'] = args.topk_percent[0]
+                        vuln_aggregator.update(metrics, metadata=metadata)
+                    
+                    # Generate visualization if within limit
+                    if vis_count < args.max_visualizations:
+                        pbar.set_postfix_str(f"Generating visualization {vis_count + 1}/{args.max_visualizations}", refresh=True)
+                        vis_path = os.path.join(vis_output, f"{base_name}_grid.png")
+                        
+                        try:
+                            visualize.create_visualization_grid(
+                                images=vis_data['images'],
+                                exp_orig=vis_data['exp_orig'],
+                                exp_adv=vis_data['exp_adv'],
+                                vuln_maps=vis_data['vuln_maps'],
+                                gt_masks=vis_data['gt_masks'],
+                                filename=sample.filename,
+                                attack_type=attack_type,
+                                output_path=vis_path,
+                                dpi=args.dpi,
+                                detector_name=detector.name,
+                            )
+                            vis_count += 1
+                        except Exception as e:
+                            logger.warning(f"Visualization failed for {sample.filename}: {e}")
+                
+                except Exception as e:
+                    pbar.set_postfix_str(f"ERROR: {str(e)[:30]}", refresh=True)
+                    logger.error(f"Failed to process {sample.filename}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+            
+            # Close progress bar
+            pbar.close()
+            
+            logger.info(f"Completed processing {len(samples)} samples")
+            logger.info(f"Generated {vis_count} visualizations")
+            
+            # Save vulnerability metrics CSV
+            if len(vuln_aggregator) > 0:
+                logger.info(f"Saving vulnerability metrics...")
+                # Ensure directory exists before saving
+                os.makedirs(attack_output, exist_ok=True)
+                vuln_csv = os.path.join(attack_output, "metrics_vulnerability.csv")
+                vuln_aggregator.to_csv(vuln_csv)
+                logger.info(f"✓ Vulnerability metrics saved to: {vuln_csv}")
+                logger.info(f"  Samples: {len(vuln_aggregator)}")
+                logger.info(f"  Averages: {vuln_aggregator.summary_str()}")
+            else:
+                logger.warning(f"No vulnerability metrics collected for {attack_type}")
+        
         # Save explanation metrics CSV (once per detector, attack-independent)
         logger.info(f"\n{'=' * 60}")
         logger.info(f"Saving explanation metrics for {detector_name}...")
@@ -451,42 +401,6 @@ def main():
         else:
             logger.warning(f"No explanation metrics collected for {detector_name}")
         logger.info(f"{'=' * 60}")
-
-        # Run each attack in a separate process
-        logger.info(f"\n--- Running {len(attacks)} attack(s) in parallel processes ---")
-        max_workers = args.attack_processes or len(attacks)
-        max_workers = min(max_workers, len(attacks))
-
-        ctx = mp.get_context('spawn')
-        futures: Dict[concurrent.futures.Future, str] = {}
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as executor:
-            for attack_type in attacks:
-                fut = executor.submit(
-                    _run_single_attack_process,
-                    detector_name=detector_name,
-                    weights_path=weights_dict.get(detector_name),
-                    device_str=str(device),
-                    attack_type=attack_type,
-                    samples=samples,
-                    image_types=image_types,
-                    root_dataset=args.root_dataset,
-                    topk_percents=args.topk_percent,
-                    overwrite_attacks=args.overwrite_attacks,
-                    output_dir=args.output_dir,
-                    max_visualizations=args.max_visualizations,
-                    dpi=args.dpi,
-                )
-                futures[fut] = attack_type
-
-            for fut in concurrent.futures.as_completed(futures):
-                attack_type = futures[fut]
-                try:
-                    atk, n_metrics, n_vis = fut.result()
-                    logger.info(
-                        f"✓ Completed attack {atk}: vulnerability rows={n_metrics}, visualizations={n_vis}",
-                    )
-                except Exception as e:
-                    logger.error(f"Attack process failed for {attack_type}: {e}")
     
     # Summary
     logger.info(f"\n{'=' * 60}")
@@ -504,8 +418,4 @@ def main():
 
 
 if __name__ == '__main__':
-    try:
-        mp.set_start_method('spawn')
-    except RuntimeError:
-        pass
     main()

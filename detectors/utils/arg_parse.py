@@ -114,13 +114,6 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
         help='Limit processing to first N samples (for testing). Default: process all.',
     )
-
-    parser.add_argument(
-        '--attack_processes',
-        type=int,
-        default=None,
-        help='Number of parallel processes to use across attacks (default: number of attacks).',
-    )
     
     args = parser.parse_args()
     
@@ -165,7 +158,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
             if detector not in DETECTOR_MAP:
                 errors.append(
                     f"Unknown detector: {detector}. "
-                    f"Available: {', '.join(sorted(DETECTOR_MAP.keys()))}"
+                    f"Available: {', '.join(sorted(DETECTOR_MAP.keys()))}",
                 )
     
     # Validate attacks
@@ -176,7 +169,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
             if attack.lower() not in SUPPORTED_ATTACKS:
                 errors.append(
                     f"Unknown attack type: {attack}. "
-                    f"Supported: {', '.join(sorted(SUPPORTED_ATTACKS))}"
+                    f"Supported: {', '.join(sorted(SUPPORTED_ATTACKS))}",
                 )
     
     # Validate image_types
@@ -187,7 +180,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
             if img_type.lower() not in SUPPORTED_IMAGE_TYPES:
                 errors.append(
                     f"Unknown image type: {img_type}. "
-                    f"Supported: {', '.join(sorted(SUPPORTED_IMAGE_TYPES))}"
+                    f"Supported: {', '.join(sorted(SUPPORTED_IMAGE_TYPES))}",
                 )
     
     # Warn about 'real' in image_types
@@ -201,11 +194,6 @@ def validate_arguments(args: argparse.Namespace) -> None:
     for topk in args.topk_percent:
         if not (0 < topk <= 100):
             errors.append(f"topk_percent must be in (0, 100], got: {topk}")
-
-    # Validate attack_processes
-    if hasattr(args, 'attack_processes') and args.attack_processes is not None:
-        if args.attack_processes <= 0:
-            errors.append(f"attack_processes must be a positive integer, got: {args.attack_processes}")
     
     if errors:
         for error in errors:
