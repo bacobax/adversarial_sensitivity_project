@@ -235,8 +235,8 @@ def process_sample(
             #         sigmoid_adv = torch.sigmoid(logit_adv).item()
             #         _set_cell(df, df_key_adv, "logit", float(logit_adv))
             #         _set_cell(df, df_key_adv, "sigmoid", float(sigmoid_adv))
-                
-                torch.cuda.empty_cache()
+            
+            #     torch.cuda.empty_cache()
             
             # Compute vulnerability map
             exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
