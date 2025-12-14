@@ -101,7 +101,7 @@ def process_sample(
     topk_percents: List[float],
     overwrite_attacks: bool,
     cache_paths: Dict[Tuple[str, str], str],
-    results: Dict[str, Dict[str, List[float]]],
+    # results: Dict[str, Dict[str, List[float]]],
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], Dict[str, Any]]:
     """
     Process a single sample for all requested image types.
@@ -287,15 +287,15 @@ def process_sample(
         flat_mask = mask.reshape(-1).astype(np.uint8)
         ap_orig = float(average_precision_score(flat_mask, orig.reshape(-1)))
         ap_vuln = float(average_precision_score(flat_mask, vuln.reshape(-1)))
-        results['ap_orig'][img_type].append(ap_orig)
-        results['ap_vuln'][img_type].append(ap_vuln)
+        # results['ap_orig'][img_type].append(ap_orig)
+        # results['ap_vuln'][img_type].append(ap_vuln)
         
         if np.sum(orig) > 0:
             mass_in_mask_orig = np.sum(orig[mask]) / np.sum(orig)
-            results['mim_orig'][img_type].append(mass_in_mask_orig)
+            # results['mim_orig'][img_type].append(mass_in_mask_orig)
         if np.sum(vuln) > 0:
             mass_in_mask_vuln = np.sum(vuln[mask]) / np.sum(vuln)
-            results['mim_vuln'][img_type].append(mass_in_mask_vuln)
+            # results['mim_vuln'][img_type].append(mass_in_mask_vuln)
         
         _set_cell(df, df_key_orig, "ap", ap_orig)
         _set_cell(df, df_key_adv, "ap", ap_vuln)
@@ -431,7 +431,7 @@ def main():
                         topk_percents=args.topk_percent,
                         overwrite_attacks=args.overwrite_attacks,
                         cache_paths=cache_paths,
-                        results=results,
+                        # results=results,
                     )
                     
                     # Update explanation metrics (only once per sample/image_type)
@@ -506,14 +506,14 @@ def main():
             else:
                 logger.warning(f"No vulnerability metrics collected for {attack_type}")
                 
-                print()
-            for img_type in image_types:
-                print(img_type)
-                print('*' * 80)
-                print(f'orig: ap={np.mean(results['ap_orig'][img_type]):.4f} mim={np.mean(results['mim_orig'][img_type]):.4f}')
-                print(f'vuln: ap={np.mean(results['ap_vuln'][img_type]):.4f} mim={np.mean(results['mim_vuln'][img_type]):.4f}')
-                print('*' * 80)
-                print()
+            #     print()
+            # for img_type in image_types:
+            #     print(img_type)
+            #     print('*' * 80)
+            #     print(f'orig: ap={np.mean(results['ap_orig'][img_type]):.4f} mim={np.mean(results['mim_orig'][img_type]):.4f}')
+            #     print(f'vuln: ap={np.mean(results['ap_vuln'][img_type]):.4f} mim={np.mean(results['mim_vuln'][img_type]):.4f}')
+            #     print('*' * 80)
+            #     print()
             
             # Save df
             logger.info(f"Saving df to csv...")
