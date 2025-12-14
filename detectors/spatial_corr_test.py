@@ -59,6 +59,20 @@ from PIL import Image
 LIME_BATCH_SIZE = 256
 LIME_NUM_SAMPLES = 256
 
+cvs_file = 'outputs/results.csv'
+cvs_header = 'detector,attack,category,image,logit,sigmoid,ap,mim'
+
+if not os.path.exists(cvs_file):
+    with open(cvs_file, 'w') as f:
+        f.write(cvs_header + '\n')
+
+CSV_COLS = cvs_header.split(',')
+INDEX_COLS = ["detector", "attack", "category", "image"]
+DATA_COLS = [c for c in CSV_COLS if c not in INDEX_COLS]
+
+df = pd.DataFrame(columns=DATA_COLS)
+df.index = pd.MultiIndex.from_tuples([], names=INDEX_COLS)
+
 
 def _ensure_row(df_: pd.DataFrame, key: tuple) -> None:
     """Ensure MultiIndex row exists so df.loc[...] assignments work."""
@@ -88,7 +102,6 @@ def process_sample(
     overwrite_attacks: bool,
     cache_paths: Dict[Tuple[str, str], str],
     results: Dict[str, Dict[str, List[float]]],
-    df: pd.DataFrame,
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], Dict[str, Any]]:
     """
     Process a single sample for all requested image types.
@@ -178,7 +191,6 @@ def process_sample(
                 gt_mask = image_loader.load_mask(mask_path)
             else:  # diffcat
                 gt_mask = image_loader.bbox_to_mask(mask_path, image_np.shape[:2])
-            vis_data['gt_masks'][img_type] = gt_mask
             
             kwargs = {}
             if detector.name == 'WaveRep':
@@ -290,11 +302,11 @@ def process_sample(
         _set_cell(df, df_key_orig, "mim", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
         _set_cell(df, df_key_adv, "mim", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
         
-        vis_data['exp_orig'][img_type] = exp_orig
-        vis_data['exp_adv'][img_type] = exp_adv
-        vis_data['vuln_maps'][img_type] = vuln / vuln.max()
-        vis_data['gt_masks'][img_type] = mask.astype(np.uint8) * 255
-        vis_data['images'][img_type] = image_np
+        # vis_data['exp_orig'][img_type] = exp_orig
+        # vis_data['exp_adv'][img_type] = exp_adv
+        # vis_data['vuln_maps'][img_type] = vuln / vuln.max()
+        # vis_data['gt_masks'][img_type] = mask.astype(np.uint8) * 255
+        # vis_data['images'][img_type] = image_np
     
     return explanation_metrics, vulnerability_metrics, vis_data
 
@@ -349,20 +361,6 @@ def main():
         logger.info(f"\n{'=' * 60}")
         logger.info(f"Processing detector: {detector_name}")
         logger.info(f"{'=' * 60}")
-        
-        cvs_file = 'outputs/results.csv'
-        cvs_header = 'detector,attack,category,image,logit,sigmoid,ap,mim'
-        
-        if not os.path.exists(cvs_file):
-            with open(cvs_file, 'w') as f:
-                f.write(cvs_header + '\n')
-        
-        CSV_COLS = cvs_header.split(',')
-        INDEX_COLS = ["detector", "attack", "category", "image"]
-        DATA_COLS = [c for c in CSV_COLS if c not in INDEX_COLS]
-        
-        df = pd.DataFrame(columns=DATA_COLS)
-        df.index = pd.MultiIndex.from_tuples([], names=INDEX_COLS)
         
         # Load detector
         try:
@@ -434,7 +432,6 @@ def main():
                         overwrite_attacks=args.overwrite_attacks,
                         cache_paths=cache_paths,
                         results=results,
-                        df=df,
                     )
                     
                     # Update explanation metrics (only once per sample/image_type)
