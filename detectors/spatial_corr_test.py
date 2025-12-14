@@ -59,19 +59,19 @@ from PIL import Image
 LIME_BATCH_SIZE = 256
 LIME_NUM_SAMPLES = 256
 
-# cvs_file = 'outputs/results.csv'
-# cvs_header = 'detector,attack,category,image,logit,sigmoid,ap,mim'
-#
-# if not os.path.exists(cvs_file):
-#     with open(cvs_file, 'w') as f:
-#         f.write(cvs_header + '\n')
-#
-# CSV_COLS = cvs_header.split(',')
-# INDEX_COLS = ["detector", "attack", "category", "image"]
-# DATA_COLS = [c for c in CSV_COLS if c not in INDEX_COLS]
-#
-# df = pd.DataFrame(columns=DATA_COLS)
-# df.index = pd.MultiIndex.from_tuples([], names=INDEX_COLS)
+cvs_file = 'outputs/results.csv'
+cvs_header = 'detector,attack,category,image,logit,sigmoid,ap,mim'
+
+if not os.path.exists(cvs_file):
+    with open(cvs_file, 'w') as f:
+        f.write(cvs_header + '\n')
+
+CSV_COLS = cvs_header.split(',')
+INDEX_COLS = ["detector", "attack", "category", "image"]
+DATA_COLS = [c for c in CSV_COLS if c not in INDEX_COLS]
+
+df = pd.DataFrame(columns=DATA_COLS)
+df.index = pd.MultiIndex.from_tuples([], names=INDEX_COLS)
 
 
 def _ensure_row(df_: pd.DataFrame, key: tuple) -> None:
@@ -168,18 +168,18 @@ def process_sample(
         image_pil = load_image(img_path)
         image_np = np.array(image_pil)
         
-        # df_key_orig = (detector.name, 'orig', img_type, os.path.basename(sample.filename))
-        # df_key_adv = (detector.name, attack_type, img_type, os.path.basename(sample.filename))
-        # _ensure_row(df, df_key_orig)
-        # _ensure_row(df, df_key_adv)
+        df_key_orig = (detector.name, 'orig', img_type, os.path.basename(sample.filename))
+        df_key_adv = (detector.name, attack_type, img_type, os.path.basename(sample.filename))
+        _ensure_row(df, df_key_orig)
+        _ensure_row(df, df_key_adv)
         
         needs_maps = (exp_orig is None) or (exp_adv is None)
-        # needs_logits = (
-        #     pd.isna(df.loc[df_key_orig, "logit"]) or
-        #     pd.isna(df.loc[df_key_adv, "logit"])
-        # )
+        needs_logits = (
+            pd.isna(df.loc[df_key_orig, "logit"]) or
+            pd.isna(df.loc[df_key_adv, "logit"])
+        )
         
-        if needs_maps:# or needs_logits:
+        if needs_maps or needs_logits:
             if not img_path or not os.path.exists(img_path):
                 continue
                 
@@ -223,20 +223,21 @@ def process_sample(
                 exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
                 np.save(cache_path_adv, exp_adv)
         
-        # if needs_logits:
-        #     with torch.inference_mode():
-        #         if pd.isna(df.loc[df_key_orig, "logit"]):
-        #             logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0).to('cuda', non_blocking=True)).detach().cpu()
-        #             sigmoid_orig = torch.sigmoid(logit_orig).item()
-        #             _set_cell(df, df_key_orig, "logit", float(logit_orig))
-        #             _set_cell(df, df_key_orig, "sigmoid", float(sigmoid_orig))
-        #
-        #         if pd.isna(df.loc[df_key_adv, "logit"]):
-        #             logit_adv = detector.forward(detector.transform(adv_image).unsqueeze(0).to('cuda', non_blocking=True)).detach().cpu()
-        #             sigmoid_adv = torch.sigmoid(logit_adv).item()
-        #             _set_cell(df, df_key_adv, "logit", float(logit_adv))
-        #             _set_cell(df, df_key_adv, "sigmoid", float(sigmoid_adv))
-        #     torch.cuda.empty_cache()
+        if needs_logits:
+            with torch.inference_mode():
+                if pd.isna(df.loc[df_key_orig, "logit"]):
+                    logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0).to('cuda', non_blocking=True)).detach().cpu()
+                    sigmoid_orig = torch.sigmoid(logit_orig).item()
+                    _set_cell(df, df_key_orig, "logit", float(logit_orig))
+                    _set_cell(df, df_key_orig, "sigmoid", float(sigmoid_orig))
+                
+                if pd.isna(df.loc[df_key_adv, "logit"]):
+                    logit_adv = detector.forward(detector.transform(adv_image).unsqueeze(0).to('cuda', non_blocking=True)).detach().cpu()
+                    sigmoid_adv = torch.sigmoid(logit_adv).item()
+                    _set_cell(df, df_key_adv, "logit", float(logit_adv))
+                    _set_cell(df, df_key_adv, "sigmoid", float(sigmoid_adv))
+            
+            torch.cuda.empty_cache()
             
             # Compute vulnerability map
             # exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
@@ -296,10 +297,10 @@ def process_sample(
             mass_in_mask_vuln = np.sum(vuln[mask]) / np.sum(vuln)
             # results['mim_vuln'][img_type].append(mass_in_mask_vuln)
         
-        # _set_cell(df, df_key_orig, "ap", ap_orig)
-        # _set_cell(df, df_key_adv, "ap", ap_vuln)
-        # _set_cell(df, df_key_orig, "mim", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
-        # _set_cell(df, df_key_adv, "mim", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
+        _set_cell(df, df_key_orig, "ap", ap_orig)
+        _set_cell(df, df_key_adv, "ap", ap_vuln)
+        _set_cell(df, df_key_orig, "mim", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
+        _set_cell(df, df_key_adv, "mim", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
         
         # vis_data['exp_orig'][img_type] = exp_orig
         # vis_data['exp_adv'][img_type] = exp_adv
@@ -516,8 +517,8 @@ def main():
             
             # Save df
             logger.info(f"Saving df to csv...")
-            # df.reset_index().to_csv(cvs_file, index=False)  # NEW
-            # logger.info(f"✓ df saved to: {cvs_file}")
+            df.reset_index().to_csv(cvs_file, index=False)  # NEW
+            logger.info(f"✓ df saved to: {cvs_file}")
         
         # Save explanation metrics CSV (once per detector, attack-independent)
         logger.info(f"\n{'=' * 60}")
