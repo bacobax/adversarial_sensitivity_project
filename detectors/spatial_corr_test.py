@@ -297,11 +297,10 @@ def process_sample(
             mass_in_mask_vuln = np.sum(vuln[mask]) / np.sum(vuln)
             # results['mim_vuln'][img_type].append(mass_in_mask_vuln)
         
-        if needs_logits:
-            _set_cell(df, df_key_orig, "ap", ap_orig)
-            _set_cell(df, df_key_adv, "ap", ap_vuln)
-            _set_cell(df, df_key_orig, "mim", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
-            _set_cell(df, df_key_adv, "mim", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
+        _set_cell(df, df_key_orig, "ap", ap_orig)
+        _set_cell(df, df_key_adv, "ap", ap_vuln)
+        _set_cell(df, df_key_orig, "mim", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
+        _set_cell(df, df_key_adv, "mim", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
             
         # vis_data['exp_orig'][img_type] = exp_orig
         # vis_data['exp_adv'][img_type] = exp_adv
