@@ -71,8 +71,7 @@ DATA_COLS = [c for c in CSV_COLS if c not in INDEX_COLS]
 
 # read df
 df = pd.read_csv(cvs_file)
-df.index = pd.MultiIndex.from_tuples([], names=INDEX_COLS)
-
+df.set_index(INDEX_COLS, inplace=True)
 
 def _ensure_row(df_: pd.DataFrame, key: tuple) -> None:
     """Ensure MultiIndex row exists so df.loc[...] assignments work."""
