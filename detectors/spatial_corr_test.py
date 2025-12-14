@@ -41,22 +41,32 @@ from typing import Any, Dict, List, Tuple
 
 import cv2
 import numpy as np
+import pandas as pd
 import torch
-from sklearn.metrics import average_precision_score
 from skimage.segmentation import slic
+from sklearn.metrics import average_precision_score
 from tqdm import tqdm
 
 from support.base_detector import BaseDetector
 from support.detect_utils import get_device
 from utils import arg_parse, attack, evaluate, image_loader, visualize
 from utils.detector_loader import load_detector
+from utils.image_loader import load_image
 from utils.logging import log_configuration, logger
 from utils.sample_paths import SamplePaths
-from utils.image_loader import load_image
 
 LIME_BATCH_SIZE = 256
 LIME_NUM_SAMPLES = 256
 
+cvs_file = 'outputs/results.csv'
+cvs_header = 'detector,attack,image_type,image,logit_orig,logit_adv,sigmoid_orig,sigmoid_adv,ap_orig,mim_orig,ap_vuln,mim_vuln'
+
+if not os.path.exists(cvs_file):
+    with open(cvs_file, 'w') as f:
+        f.write(cvs_header + '\n')
+
+df = pd.DataFrame(columns=cvs_header.split(','))
+df.set_index(['detector', 'attack', 'image_type', 'image'], inplace=True)
 
 def to_numpy(arr):
     """Convert tensor or array to numpy array on CPU."""
@@ -115,7 +125,7 @@ def process_sample(
             except:
                 pass
             continue
-            
+        
         exp_orig = None
         exp_adv = None
         cache_path_orig = cache_paths[('orig', img_type)]
@@ -134,18 +144,19 @@ def process_sample(
             mask_path = sample.mask_diffcat
         else:
             continue
-            
+        
         eps = 1e-8
         
+        # Load image
+        image_pil = load_image(img_path)
+        image_np = np.array(image_pil)
+        
+        df_key = (detector.name, attack_type, img_type, os.path.basename(sample.filename))
+        
         # compute only if exp_orig or exp_adv are missing
-        if exp_orig is None or exp_adv is None:
+        if exp_orig is None or exp_adv is None and df_key not in df.index:
             if not img_path or not os.path.exists(img_path):
                 continue
-            
-            # Load image
-            image_pil = load_image(img_path)
-            image_np = np.array(image_pil)
-            vis_data['images'][img_type] = image_np
             
             # Load/compute ground truth mask
             if img_type == 'samecat':
@@ -176,18 +187,24 @@ def process_sample(
             )
             
             # Compute or get cached original explanation
-            if os.path.exists(cache_path_orig):
-                exp_orig = np.load(cache_path_orig)
-            else:
+            if exp_orig is None:
                 exp_orig = to_numpy(detector.explain(image_np, **kwargs))
                 np.save(cache_path_orig, exp_orig)
             
             # Compute explanation on attacked image
-            if os.path.exists(cache_path_adv):
-                exp_adv = np.load(cache_path_adv)
-            else:
+            if exp_adv is None:
                 exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
                 np.save(cache_path_adv, exp_adv)
+            
+            logits_orig = detector.forward(image_np)
+            logits_adv = detector.forward(adv_image)
+            sigmoid_orig = 1 / (1 + np.exp(-logits_orig))
+            sigmoid_adv = 1 / (1 + np.exp(-logits_adv))
+            
+            df[df_key]['logit_orig'] = logits_orig
+            df[df_key]['logit_sdv'] = logits_adv
+            df[df_key]['sigmoid_orig'] = sigmoid_orig
+            df[df_key]['sigmoid_adv'] = sigmoid_adv
             
             # Compute vulnerability map
             # vuln_map = np.abs(exp_orig - exp_adv)
@@ -208,11 +225,25 @@ def process_sample(
             vuln_metrics = evaluate.compute_metrics(vuln_map, gt_mask, topk_percents)
             vulnerability_metrics[img_type] = vuln_metrics
         
-        exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
-        exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
-        vuln = exp_orig_norm + np.abs(-exp_adv_norm)
-        orig = np.clip(exp_orig_norm, 0, None) ** 2
-        vuln = np.clip(vuln, 0, None) ** 2
+        if detector.name == 'AnomalyOV':
+            exp_orig_norm = (exp_orig - exp_orig.min()) / (exp_orig.max() - exp_orig.min() + 1e-9)
+            exp_adv_norm = (exp_adv - exp_adv.min()) / (exp_adv.max() - exp_adv.min() + 1e-9)
+        else:
+            exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
+            exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
+            
+        if detector.name == 'WaveRep':
+            vuln = exp_orig_norm + np.abs(-exp_adv_norm)
+        else:
+            vuln = exp_orig_norm - exp_adv_norm
+        
+        orig = np.clip(exp_orig_norm, 0, None)**2
+        vuln = np.clip(vuln, 0, None)**2
+        
+        while len(orig.shape) > 2:
+            orig = orig[0]
+        while len(vuln.shape) > 2:
+            vuln = vuln[0]
         
         mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         if orig.shape != mask.shape:
@@ -221,22 +252,32 @@ def process_sample(
             mask = cv2.resize(mask, (vuln.shape[1], vuln.shape[0]), interpolation=cv2.INTER_AREA)
         mask = np.array(mask, dtype=bool)
         
-        mass_in_mask_orig = np.sum(orig[mask]) / (np.sum(orig) + eps)
-        mass_in_mask_vuln = np.sum(vuln[mask]) / (np.sum(vuln) + eps)
-        
         flat_mask = mask.reshape(-1).astype(np.uint8)
-        if flat_mask.min() != flat_mask.max():
-            ap_orig = float(average_precision_score(flat_mask, orig.reshape(-1)))
-            ap_vuln = float(average_precision_score(flat_mask, vuln.reshape(-1)))
-            results['ap_orig'][img_type].append(ap_orig)
-            results['ap_vuln'][img_type].append(ap_vuln)
-    
-        results['mim_orig'][img_type].append(mass_in_mask_orig)
-        results['mim_vuln'][img_type].append(mass_in_mask_vuln)
-    
+        ap_orig = float(average_precision_score(flat_mask, orig.reshape(-1)))
+        ap_vuln = float(average_precision_score(flat_mask, vuln.reshape(-1)))
+        results['ap_orig'][img_type].append(ap_orig)
+        results['ap_vuln'][img_type].append(ap_vuln)
+        df[df_key]['ap_orig'] = ap_orig
+        df[df_key]['ap_vuln'] = ap_vuln
+        
+        if np.sum(orig) > 0:
+            mass_in_mask_orig = np.sum(orig[mask]) / np.sum(orig)
+            results['mim_orig'][img_type].append(mass_in_mask_orig)
+            df[df_key]['mim_orig'] = mass_in_mask_orig
+        else:
+            df[df_key]['mim_orig'] = -1
+        if np.sum(vuln) > 0:
+            mass_in_mask_vuln = np.sum(vuln[mask]) / np.sum(vuln)
+            results['mim_vuln'][img_type].append(mass_in_mask_vuln)
+            df[df_key]['mim_vuln'] = mass_in_mask_vuln
+        else:
+            df[df_key]['mim_vuln'] = -1
+        
         vis_data['exp_orig'][img_type] = exp_orig
         vis_data['exp_adv'][img_type] = exp_adv
-        vis_data['vuln_maps'][img_type] = vuln
+        vis_data['vuln_maps'][img_type] = vuln / vuln.max()
+        vis_data['gt_masks'][img_type] = mask.astype(np.uint8) * 255
+        vis_data['images'][img_type] = image_np
         
     return explanation_metrics, vulnerability_metrics, vis_data
 
@@ -361,7 +402,7 @@ def main():
                         topk_percents=args.topk_percent,
                         overwrite_attacks=args.overwrite_attacks,
                         cache_paths=cache_paths,
-                        results=results
+                        results=results,
                     )
                     
                     # Update explanation metrics (only once per sample/image_type)
@@ -435,14 +476,14 @@ def main():
                 logger.info(f"  Averages: {vuln_aggregator.summary_str()}")
             else:
                 logger.warning(f"No vulnerability metrics collected for {attack_type}")
-            
+                
                 print()
             for img_type in image_types:
                 print(img_type)
-                print('*'*80)
+                print('*' * 80)
                 print(f'orig: ap={np.mean(results['ap_orig'][img_type]):.4f} mim={np.mean(results['mim_orig'][img_type]):.4f}')
                 print(f'vuln: ap={np.mean(results['ap_vuln'][img_type]):.4f} mim={np.mean(results['mim_vuln'][img_type]):.4f}')
-                print('*'*80)
+                print('*' * 80)
                 print()
         
         # Save explanation metrics CSV (once per detector, attack-independent)
