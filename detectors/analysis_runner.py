@@ -65,7 +65,16 @@ EXPLANATION_CHARTS_DIR = CHARTS_DIR / "explanation"
 VULNERABILITY_CHARTS_DIR = CHARTS_DIR / "vulnerability"
 
 # Metrics to analyze
-MAIN_METRICS = ["mass_frac", "pr_auc", "roc_auc"]
+# Include IoU (stored in CSV as `iou_topk`) as requested
+MAIN_METRICS = ["iou_topk", "mass_frac", "pr_auc", "roc_auc"]
+
+# Friendly display names for metrics
+METRIC_DISPLAY_NAMES = {
+    "iou_topk": "IoU",
+    "mass_frac": "Mass Fraction",
+    "pr_auc": "PR-AUC",
+    "roc_auc": "ROC-AUC",
+}
 
 # Plot style configuration
 plt.style.use("seaborn-v0_8-whitegrid")
@@ -87,6 +96,7 @@ def create_output_directories() -> None:
         CHARTS_DIR,
         EXPLANATION_CHARTS_DIR,
         VULNERABILITY_CHARTS_DIR,
+        CHARTS_DIR / "exp_vs_vuln",
     ]
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
@@ -456,7 +466,9 @@ def save_tables(tables: Dict[str, pd.DataFrame], output_dir: Path) -> None:
 # Plotting Functions - Explanation Track
 # =============================================================================
 
-def plot_explanation_mass_frac_bar(df: pd.DataFrame, output_path: Path) -> None:
+def plot_explanation_mass_frac_bar(
+    df: pd.DataFrame, output_path: Path, ylim: tuple[float, float] | None = None
+) -> None:
     """
     E1: Bar chart of mass_frac per model, grouped by image_type.
     """
@@ -500,7 +512,10 @@ def plot_explanation_mass_frac_bar(df: pd.DataFrame, output_path: Path) -> None:
     ax.set_xticks(x)
     ax.set_xticklabels(models, rotation=45, ha="right")
     ax.legend(title="Image Type")
-    ax.set_ylim(bottom=0)
+    if ylim is not None:
+        ax.set_ylim(ylim[0], ylim[1])
+    else:
+        ax.set_ylim(0, 1)
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches="tight")
@@ -508,7 +523,9 @@ def plot_explanation_mass_frac_bar(df: pd.DataFrame, output_path: Path) -> None:
     print(f"  Saved: {output_path.name}")
 
 
-def plot_explanation_pr_auc_heatmap(df: pd.DataFrame, output_path: Path) -> None:
+def plot_explanation_pr_auc_heatmap(
+    df: pd.DataFrame, output_path: Path, vlim: tuple[float, float] | None = None
+) -> None:
     """
     E2: Heatmap of PR-AUC for each (model × image_type).
     Explanation is attack-independent, so we show metrics by image_type.
@@ -525,16 +542,21 @@ def plot_explanation_pr_auc_heatmap(df: pd.DataFrame, output_path: Path) -> None
     
     fig, ax = plt.subplots(figsize=HEATMAP_SIZE)
     
+    vmin_val = vlim[0] if vlim is not None else 0
+    vmax_val = vlim[1] if vlim is not None else 1
+    
     sns.heatmap(
         pivot_df,
         annot=True,
         fmt=".3f",
         cmap="RdYlGn",
         ax=ax,
+        vmin=vmin_val,
+        vmax=vmax_val,
         cbar_kws={"label": "Mean PR-AUC"},
         linewidths=0.5
     )
-    
+
     ax.set_title("Explanation Maps: PR-AUC by Model and Image Type", fontsize=14)
     ax.set_xlabel("Image Type", fontsize=12)
     ax.set_ylabel("Model", fontsize=12)
@@ -545,7 +567,12 @@ def plot_explanation_pr_auc_heatmap(df: pd.DataFrame, output_path: Path) -> None
     print(f"  Saved: {output_path.name}")
 
 
-def plot_explanation_samecat_vs_diffcat_scatter(df: pd.DataFrame, output_path: Path) -> None:
+def plot_explanation_samecat_vs_diffcat_scatter(
+    df: pd.DataFrame,
+    output_path: Path,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+) -> None:
     """
     E3: Scatter plot of mean_mass_frac(samecat) vs mean_mass_frac(diffcat) per model.
     """
@@ -574,12 +601,25 @@ def plot_explanation_samecat_vs_diffcat_scatter(df: pd.DataFrame, output_path: P
         ax.annotate(row["model"], (row["samecat"], row["diffcat"]),
                    textcoords="offset points", xytext=(5, 5), fontsize=9)
     
+    # Use provided limits or compute optimized square range from data
+    if xlim is not None and ylim is not None:
+        axis_min, axis_max = xlim[0], xlim[1]
+    else:
+        # Compute square range that encompasses all points with padding
+        all_x = pivot_df["samecat"].values
+        all_y = pivot_df["diffcat"].values
+        data_min = min(all_x.min(), all_y.min())
+        data_max = max(all_x.max(), all_y.max())
+        data_range = data_max - data_min
+        padding = max(0.05, data_range * 0.15)  # 15% padding or at least 0.05
+        axis_min = max(0, data_min - padding)
+        axis_max = min(1, data_max + padding)
+    
+    ax.set_xlim(axis_min, axis_max)
+    ax.set_ylim(axis_min, axis_max)
+    
     # Add diagonal reference line
-    lims = [
-        min(ax.get_xlim()[0], ax.get_ylim()[0]),
-        max(ax.get_xlim()[1], ax.get_ylim()[1])
-    ]
-    ax.plot(lims, lims, 'k--', alpha=0.5, label='x=y')
+    ax.plot([axis_min, axis_max], [axis_min, axis_max], 'k--', alpha=0.5, label='x=y')
     
     ax.set_xlabel("Mean Mass Fraction (samecat)", fontsize=12)
     ax.set_ylabel("Mean Mass Fraction (diffcat)", fontsize=12)
@@ -593,7 +633,9 @@ def plot_explanation_samecat_vs_diffcat_scatter(df: pd.DataFrame, output_path: P
     print(f"  Saved: {output_path.name}")
 
 
-def plot_explanation_mass_frac_distribution(df: pd.DataFrame, output_path: Path) -> None:
+def plot_explanation_mass_frac_distribution(
+    df: pd.DataFrame, output_path: Path, xlim: tuple[float, float] | None = None
+) -> None:
     """
     E4: Distribution (KDE) of mass_frac per image, overlayed per model.
     Explanation data is attack-independent (computed from original benign images).
@@ -616,7 +658,10 @@ def plot_explanation_mass_frac_distribution(df: pd.DataFrame, output_path: Path)
     ax.set_ylabel("Density", fontsize=12)
     ax.set_title("Explanation Maps: Mass Fraction Distribution by Model", fontsize=14)
     ax.legend(title="Model", loc="best")
-    ax.set_xlim(left=0)
+    if xlim is not None:
+        ax.set_xlim(xlim[0], xlim[1])
+    else:
+        ax.set_xlim(0, 1)
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches="tight")
@@ -628,7 +673,9 @@ def plot_explanation_mass_frac_distribution(df: pd.DataFrame, output_path: Path)
 # Plotting Functions - Vulnerability Track
 # =============================================================================
 
-def plot_vulnerability_mass_frac_bar(df: pd.DataFrame, output_path: Path) -> None:
+def plot_vulnerability_mass_frac_bar(
+    df: pd.DataFrame, output_path: Path, ylim: tuple[float, float] | None = None
+) -> None:
     """
     V1: Bar chart of mass_frac_vuln per model, grouped by attack_type.
     """
@@ -670,7 +717,10 @@ def plot_vulnerability_mass_frac_bar(df: pd.DataFrame, output_path: Path) -> Non
     ax.set_xticks(x)
     ax.set_xticklabels(models, rotation=45, ha="right")
     ax.legend(title="Attack Type")
-    ax.set_ylim(bottom=0)
+    if ylim is not None:
+        ax.set_ylim(ylim[0], ylim[1])
+    else:
+        ax.set_ylim(0, 1)
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches="tight")
@@ -678,7 +728,9 @@ def plot_vulnerability_mass_frac_bar(df: pd.DataFrame, output_path: Path) -> Non
     print(f"  Saved: {output_path.name}")
 
 
-def plot_vulnerability_pr_auc_heatmap(df: pd.DataFrame, output_path: Path) -> None:
+def plot_vulnerability_pr_auc_heatmap(
+    df: pd.DataFrame, output_path: Path, vlim: tuple[float, float] | None = None
+) -> None:
     """
     V2: Heatmap of PR-AUC for vulnerability maps (model × attack_type).
     """
@@ -694,16 +746,21 @@ def plot_vulnerability_pr_auc_heatmap(df: pd.DataFrame, output_path: Path) -> No
     
     fig, ax = plt.subplots(figsize=HEATMAP_SIZE)
     
+    vmin_val = vlim[0] if vlim is not None else 0
+    vmax_val = vlim[1] if vlim is not None else 1
+    
     sns.heatmap(
         pivot_df,
         annot=True,
         fmt=".3f",
         cmap="RdYlGn",
         ax=ax,
+        vmin=vmin_val,
+        vmax=vmax_val,
         cbar_kws={"label": "Mean PR-AUC"},
         linewidths=0.5
     )
-    
+
     ax.set_title("Vulnerability Maps: PR-AUC by Model and Attack Type", fontsize=14)
     ax.set_xlabel("Attack Type", fontsize=12)
     ax.set_ylabel("Model", fontsize=12)
@@ -714,7 +771,12 @@ def plot_vulnerability_pr_auc_heatmap(df: pd.DataFrame, output_path: Path) -> No
     print(f"  Saved: {output_path.name}")
 
 
-def plot_vulnerability_samecat_vs_diffcat_scatter(df: pd.DataFrame, output_path: Path) -> None:
+def plot_vulnerability_samecat_vs_diffcat_scatter(
+    df: pd.DataFrame,
+    output_path: Path,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+) -> None:
     """
     V3: Scatter plot of mean_mass_frac_vuln(samecat) vs mean_mass_frac_vuln(diffcat).
     Points colored by attack_type.
@@ -734,6 +796,10 @@ def plot_vulnerability_samecat_vs_diffcat_scatter(df: pd.DataFrame, output_path:
     colors = sns.color_palette("husl", len(attack_types))
     markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p']
     
+    # Collect all points for axis range calculation
+    all_samecat = []
+    all_diffcat = []
+    
     for i, attack in enumerate(attack_types):
         attack_df = df[df["attack_type"] == attack]
         
@@ -747,6 +813,9 @@ def plot_vulnerability_samecat_vs_diffcat_scatter(df: pd.DataFrame, output_path:
         if "samecat" not in pivot_df.columns or "diffcat" not in pivot_df.columns:
             continue
         
+        all_samecat.extend(pivot_df["samecat"].values)
+        all_diffcat.extend(pivot_df["diffcat"].values)
+        
         marker = markers[i % len(markers)]
         
         for _, row in pivot_df.iterrows():
@@ -756,12 +825,25 @@ def plot_vulnerability_samecat_vs_diffcat_scatter(df: pd.DataFrame, output_path:
             ax.annotate(f"{row['model']}", (row["samecat"], row["diffcat"]),
                        textcoords="offset points", xytext=(3, 3), fontsize=7)
     
+    # Use provided limits or compute optimized square range from data
+    if xlim is not None and ylim is not None:
+        axis_min, axis_max = xlim[0], xlim[1]
+    elif all_samecat and all_diffcat:
+        # Compute square range that encompasses all points with padding
+        data_min = min(min(all_samecat), min(all_diffcat))
+        data_max = max(max(all_samecat), max(all_diffcat))
+        data_range = data_max - data_min
+        padding = max(0.05, data_range * 0.15)  # 15% padding or at least 0.05
+        axis_min = max(0, data_min - padding)
+        axis_max = min(1, data_max + padding)
+    else:
+        axis_min, axis_max = 0, 1
+    
+    ax.set_xlim(axis_min, axis_max)
+    ax.set_ylim(axis_min, axis_max)
+    
     # Add diagonal reference line
-    lims = [
-        min(ax.get_xlim()[0], ax.get_ylim()[0]),
-        max(ax.get_xlim()[1], ax.get_ylim()[1])
-    ]
-    ax.plot(lims, lims, 'k--', alpha=0.5, label='x=y')
+    ax.plot([axis_min, axis_max], [axis_min, axis_max], 'k--', alpha=0.5, label='x=y')
     
     ax.set_xlabel("Mean Mass Fraction (samecat)", fontsize=12)
     ax.set_ylabel("Mean Mass Fraction (diffcat)", fontsize=12)
@@ -778,7 +860,9 @@ def plot_vulnerability_samecat_vs_diffcat_scatter(df: pd.DataFrame, output_path:
     print(f"  Saved: {output_path.name}")
 
 
-def plot_vulnerability_mass_frac_distribution(df: pd.DataFrame, output_path: Path) -> None:
+def plot_vulnerability_mass_frac_distribution(
+    df: pd.DataFrame, output_path: Path, xlim: tuple[float, float] | None = None
+) -> None:
     """
     V4: Distribution (KDE) of mass_frac_vuln across images, per attack_type.
     """
@@ -815,7 +899,10 @@ def plot_vulnerability_mass_frac_distribution(df: pd.DataFrame, output_path: Pat
     ax.set_xlabel("Mass Fraction (Vulnerability)", fontsize=12)
     ax.set_ylabel("Density", fontsize=12)
     ax.set_title("Vulnerability Maps: Mass Fraction Distribution", fontsize=14)
-    ax.set_xlim(left=0)
+    if xlim is not None:
+        ax.set_xlim(xlim[0], xlim[1])
+    else:
+        ax.set_xlim(0, 1)
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches="tight")
@@ -827,28 +914,304 @@ def plot_vulnerability_mass_frac_distribution(df: pd.DataFrame, output_path: Pat
 # Chart Generation Orchestration
 # =============================================================================
 
-def generate_explanation_charts(df: pd.DataFrame, output_dir: Path) -> None:
+def compute_shared_ranges(
+    explanation_df: pd.DataFrame, vulnerability_df: pd.DataFrame
+) -> dict:
+    """
+    Compute shared axis ranges for paired plots across explanation and vulnerability data.
+    Returns a dict with keys for each plot type.
+    """
+    ranges = {}
+    
+    # mass_frac_bar: y-axis is mean mass_frac (computed from grouped means)
+    all_mass_frac_means = []
+    if not explanation_df.empty and "mass_frac" in explanation_df.columns:
+        if "image_type" in explanation_df.columns:
+            grouped = explanation_df.groupby(["model", "image_type"], as_index=False)["mass_frac"].mean()
+            all_mass_frac_means.extend(grouped["mass_frac"].dropna().tolist())
+    if not vulnerability_df.empty and "mass_frac" in vulnerability_df.columns:
+        if "attack_type" in vulnerability_df.columns:
+            grouped = vulnerability_df.groupby(["model", "attack_type"], as_index=False)["mass_frac"].mean()
+            all_mass_frac_means.extend(grouped["mass_frac"].dropna().tolist())
+    
+    if all_mass_frac_means:
+        bar_min = min(all_mass_frac_means)
+        bar_max = max(all_mass_frac_means)
+        bar_padding = max(0.02, (bar_max - bar_min) * 0.1)
+        ranges["mass_frac_bar_ylim"] = (max(0, bar_min - bar_padding), min(1, bar_max + bar_padding))
+    else:
+        ranges["mass_frac_bar_ylim"] = (0, 1)
+    
+    # pr_auc_heatmap: vmin/vmax from grouped mean PR-AUC values (same as what's displayed)
+    all_pr_auc_means = []
+    if not explanation_df.empty and "pr_auc" in explanation_df.columns:
+        if "image_type" in explanation_df.columns:
+            grouped = explanation_df.groupby(["model", "image_type"], as_index=False)["pr_auc"].mean()
+            all_pr_auc_means.extend(grouped["pr_auc"].dropna().tolist())
+    if not vulnerability_df.empty and "pr_auc" in vulnerability_df.columns:
+        if "attack_type" in vulnerability_df.columns:
+            grouped = vulnerability_df.groupby(["model", "attack_type"], as_index=False)["pr_auc"].mean()
+            all_pr_auc_means.extend(grouped["pr_auc"].dropna().tolist())
+    
+    if all_pr_auc_means:
+        pr_min = min(all_pr_auc_means)
+        pr_max = max(all_pr_auc_means)
+        pr_padding = max(0.02, (pr_max - pr_min) * 0.1)
+        ranges["pr_auc_vlim"] = (max(0, pr_min - pr_padding), min(1, pr_max + pr_padding))
+    else:
+        ranges["pr_auc_vlim"] = (0, 1)
+    
+    # samecat_vs_diffcat: xlim/ylim from pivot means
+    all_samecat = []
+    all_diffcat = []
+    
+    for df in [explanation_df, vulnerability_df]:
+        if df.empty or "mass_frac" not in df.columns or "image_type" not in df.columns:
+            continue
+        
+        # Handle per-attack grouping for vulnerability
+        if "attack_type" in df.columns:
+            for attack in df["attack_type"].unique():
+                attack_df = df[df["attack_type"] == attack]
+                grouped = attack_df.groupby(["model", "image_type"], as_index=False)["mass_frac"].mean()
+                pivot = grouped.pivot(index="model", columns="image_type", values="mass_frac")
+                if "samecat" in pivot.columns:
+                    all_samecat.extend(pivot["samecat"].dropna().tolist())
+                if "diffcat" in pivot.columns:
+                    all_diffcat.extend(pivot["diffcat"].dropna().tolist())
+        else:
+            grouped = df.groupby(["model", "image_type"], as_index=False)["mass_frac"].mean()
+            pivot = grouped.pivot(index="model", columns="image_type", values="mass_frac")
+            if "samecat" in pivot.columns:
+                all_samecat.extend(pivot["samecat"].dropna().tolist())
+            if "diffcat" in pivot.columns:
+                all_diffcat.extend(pivot["diffcat"].dropna().tolist())
+    
+    if all_samecat and all_diffcat:
+        x_min, x_max = min(all_samecat), max(all_samecat)
+        y_min, y_max = min(all_diffcat), max(all_diffcat)
+        x_padding = max(0.05, (x_max - x_min) * 0.15)
+        y_padding = max(0.05, (y_max - y_min) * 0.15)
+        ranges["scatter_xlim"] = (max(0, x_min - x_padding), min(1, x_max + x_padding))
+        ranges["scatter_ylim"] = (max(0, y_min - y_padding), min(1, y_max + y_padding))
+    else:
+        ranges["scatter_xlim"] = (0, 1)
+        ranges["scatter_ylim"] = (0, 1)
+    
+    # mass_frac_distribution: xlim from all mass_frac values
+    all_mass_frac = []
+    if not explanation_df.empty and "mass_frac" in explanation_df.columns:
+        all_mass_frac.extend(explanation_df["mass_frac"].dropna().tolist())
+    if not vulnerability_df.empty and "mass_frac" in vulnerability_df.columns:
+        all_mass_frac.extend(vulnerability_df["mass_frac"].dropna().tolist())
+    
+    if all_mass_frac:
+        dist_min = min(all_mass_frac)
+        dist_max = max(all_mass_frac)
+        dist_padding = max(0.02, (dist_max - dist_min) * 0.1)
+        ranges["distribution_xlim"] = (max(0, dist_min - dist_padding), min(1, dist_max + dist_padding))
+    else:
+        ranges["distribution_xlim"] = (0, 1)
+    
+    # Debug: print computed ranges
+    print("  Computed shared ranges:")
+    for key, val in ranges.items():
+        print(f"    {key}: {val}")
+    
+    return ranges
+
+
+def generate_explanation_charts(
+    df: pd.DataFrame, output_dir: Path, shared_ranges: dict | None = None
+) -> None:
     """Generate all explanation track charts."""
     print("Generating explanation charts...")
     
-    plot_explanation_mass_frac_bar(df, output_dir / "mass_frac_bar.png")
-    plot_explanation_pr_auc_heatmap(df, output_dir / "pr_auc_heatmap.png")
-    plot_explanation_samecat_vs_diffcat_scatter(df, output_dir / "samecat_vs_diffcat_scatter.png")
-    plot_explanation_mass_frac_distribution(df, output_dir / "mass_frac_distribution.png")
+    if shared_ranges is None:
+        shared_ranges = {}
+    
+    plot_explanation_mass_frac_bar(
+        df, output_dir / "mass_frac_bar.png",
+        ylim=shared_ranges.get("mass_frac_bar_ylim")
+    )
+    plot_explanation_pr_auc_heatmap(
+        df, output_dir / "pr_auc_heatmap.png",
+        vlim=shared_ranges.get("pr_auc_vlim")
+    )
+    plot_explanation_samecat_vs_diffcat_scatter(
+        df, output_dir / "samecat_vs_diffcat_scatter.png"
+    )
+    plot_explanation_mass_frac_distribution(
+        df, output_dir / "mass_frac_distribution.png",
+        xlim=shared_ranges.get("distribution_xlim")
+    )
     
     print(f"✓ Explanation charts saved to: {output_dir}")
 
 
-def generate_vulnerability_charts(df: pd.DataFrame, output_dir: Path) -> None:
+def generate_vulnerability_charts(
+    df: pd.DataFrame, output_dir: Path, shared_ranges: dict | None = None
+) -> None:
     """Generate all vulnerability track charts."""
     print("Generating vulnerability charts...")
     
-    plot_vulnerability_mass_frac_bar(df, output_dir / "mass_frac_bar.png")
-    plot_vulnerability_pr_auc_heatmap(df, output_dir / "pr_auc_heatmap.png")
-    plot_vulnerability_samecat_vs_diffcat_scatter(df, output_dir / "samecat_vs_diffcat_scatter.png")
-    plot_vulnerability_mass_frac_distribution(df, output_dir / "mass_frac_distribution.png")
+    if shared_ranges is None:
+        shared_ranges = {}
+    
+    plot_vulnerability_mass_frac_bar(
+        df, output_dir / "mass_frac_bar.png",
+        ylim=shared_ranges.get("mass_frac_bar_ylim")
+    )
+    plot_vulnerability_pr_auc_heatmap(
+        df, output_dir / "pr_auc_heatmap.png",
+        vlim=shared_ranges.get("pr_auc_vlim")
+    )
+    plot_vulnerability_samecat_vs_diffcat_scatter(
+        df, output_dir / "samecat_vs_diffcat_scatter.png"
+    )
+    plot_vulnerability_mass_frac_distribution(
+        df, output_dir / "mass_frac_distribution.png",
+        xlim=shared_ranges.get("distribution_xlim")
+    )
     
     print(f"✓ Vulnerability charts saved to: {output_dir}")
+
+
+def plot_exp_vs_vuln_grid(
+    metric: str,
+    explanation_df: pd.DataFrame,
+    vulnerability_df: pd.DataFrame,
+    output_path: Path,
+    attack_name: str = "pgd",
+) -> None:
+    """
+    Create a grid of histograms comparing explanation vs vulnerability (fixed attack) for
+    a given metric.
+
+    Rows: models
+    Columns: ['samecat', 'diffcat']
+
+    Each cell overlays the histogram of the selected metric for explanation maps
+    (from `explanation_df`) and vulnerability maps filtered to `attack_name` (from `vulnerability_df`).
+    """
+    if explanation_df.empty and vulnerability_df.empty:
+        print(f"  Skipping exp_vs_vuln for {metric}: no data")
+        return
+
+    models = sorted(set(explanation_df.get("model", pd.Series(dtype=str)).unique())
+                    | set(vulnerability_df.get("model", pd.Series(dtype=str)).unique()))
+    if not models:
+        print(f"  Skipping exp_vs_vuln for {metric}: no models found")
+        return
+
+    image_types = ["samecat", "diffcat"]
+
+    nrows = len(models)
+    ncols = len(image_types)
+
+    # Figure size: width fixed, height scales with number of models
+    fig_w = 10
+    fig_h = max(3, nrows * 2.2)
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(fig_w, fig_h), squeeze=False)
+
+    colors = sns.color_palette("husl", 2)
+
+    for i, model in enumerate(models):
+        for j, img_type in enumerate(image_types):
+            ax = axes[i][j]
+
+            # Explanation values (attack-independent)
+            exp_vals = pd.Series(dtype=float)
+            if not explanation_df.empty:
+                exp_vals = explanation_df[
+                    (explanation_df["model"] == model) & (explanation_df["image_type"] == img_type)
+                ][metric].dropna()
+
+            # Vulnerability values filtered to attack (e.g., pgd)
+            vuln_vals = pd.Series(dtype=float)
+            if not vulnerability_df.empty and "attack_type" in vulnerability_df.columns:
+                vuln_vals = vulnerability_df[
+                    (vulnerability_df["model"] == model) &
+                    (vulnerability_df["attack_type"] == attack_name) &
+                    (vulnerability_df["image_type"] == img_type)
+                ][metric].dropna()
+
+            # If both empty, show message
+            if exp_vals.empty and vuln_vals.empty:
+                ax.text(0.5, 0.5, "No data", ha="center", va="center", fontsize=10, color="#666")
+                ax.set_xticks([])
+                ax.set_yticks([])
+                if j == 0:
+                    ax.set_ylabel(model, fontsize=9)
+                continue
+
+            # Determine combined bin edges
+            combined = pd.concat([exp_vals, vuln_vals]) if (not exp_vals.empty or not vuln_vals.empty) else pd.Series([])
+            if combined.empty:
+                bins = 10
+            else:
+                try:
+                    vmin = float(combined.min())
+                    vmax = float(combined.max())
+                    if vmin == vmax:
+                        bins = np.linspace(vmin - 0.001, vmax + 0.001, 10)
+                    else:
+                        bins = np.linspace(vmin, vmax, 20)
+                except Exception:
+                    bins = 10
+
+            # Plot histograms (density normalized)
+            if not exp_vals.empty:
+                ax.hist(exp_vals, bins=bins, density=True, alpha=0.6, label="explain", color=colors[0], edgecolor="black")
+            if not vuln_vals.empty:
+                ax.hist(vuln_vals, bins=bins, density=True, alpha=0.6, label=f"vuln ({attack_name})", color=colors[1], edgecolor="black")
+
+            # Row label
+            if j == 0:
+                ax.set_ylabel(model, fontsize=9)
+
+            # Only top row gets column title
+            if i == 0:
+                ax.set_title(img_type, fontsize=10)
+
+            # Tidy-up
+            ax.tick_params(axis='both', which='major', labelsize=8)
+            if i == nrows - 1:
+                ax.set_xlabel(METRIC_DISPLAY_NAMES.get(metric, metric), fontsize=9)
+
+            # Add legend to first row, second column to avoid repeating
+            if i == 0 and j == ncols - 1:
+                ax.legend(fontsize=8)
+
+    plt.suptitle(f"Explanation vs Vulnerability ({METRIC_DISPLAY_NAMES.get(metric, metric)})", fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved: {output_path.name}")
+
+
+def generate_exp_vs_vuln_charts(
+    explanation_df: pd.DataFrame,
+    vulnerability_df: pd.DataFrame,
+    output_dir: Path,
+    metrics: List[str] = MAIN_METRICS,
+) -> None:
+    """Generate exp_vs_vuln grids for each requested metric."""
+    print("Generating Explanation vs Vulnerability charts...")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for metric in metrics:
+        # Skip metric if not present in either dataframe
+        has_exp = (not explanation_df.empty) and (metric in explanation_df.columns)
+        has_vuln = (not vulnerability_df.empty) and (metric in vulnerability_df.columns)
+        if not (has_exp or has_vuln):
+            print(f"  Skipping {metric}: metric not present in data")
+            continue
+
+        out_path = output_dir / f"{metric}_exp_vs_vuln_grid.png"
+        plot_exp_vs_vuln_grid(metric, explanation_df, vulnerability_df, out_path, attack_name="pgd")
+
+    print(f"✓ Exp_vs_vuln charts saved to: {output_dir}")
 
 
 # =============================================================================
@@ -900,6 +1263,7 @@ def main() -> None:
         CHARTS_DIR,
         EXPLANATION_CHARTS_DIR,
         VULNERABILITY_CHARTS_DIR,
+        CHARTS_DIR / "exp_vs_vuln",
     ]
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
@@ -920,14 +1284,21 @@ def main() -> None:
     save_tables(tables, TABLES_DIR)
     print()
     
-    # Step 4: Generate charts
+    # Step 4: Compute shared axis ranges for paired plots
+    shared_ranges = compute_shared_ranges(explanation_df, vulnerability_df)
+    
+    # Step 5: Generate charts with shared ranges
     if not explanation_df.empty:
-        generate_explanation_charts(explanation_df, EXPLANATION_CHARTS_DIR)
+        generate_explanation_charts(explanation_df, EXPLANATION_CHARTS_DIR, shared_ranges)
         print()
     
     if not vulnerability_df.empty:
-        generate_vulnerability_charts(vulnerability_df, VULNERABILITY_CHARTS_DIR)
+        generate_vulnerability_charts(vulnerability_df, VULNERABILITY_CHARTS_DIR, shared_ranges)
         print()
+
+    # Generate explanation vs vulnerability comparison charts
+    generate_exp_vs_vuln_charts(explanation_df, vulnerability_df, CHARTS_DIR / "exp_vs_vuln")
+    print()
     
     # Summary
     print("=" * 60)
