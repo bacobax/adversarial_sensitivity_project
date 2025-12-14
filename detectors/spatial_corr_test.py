@@ -59,20 +59,6 @@ from PIL import Image
 LIME_BATCH_SIZE = 256
 LIME_NUM_SAMPLES = 256
 
-cvs_file = 'outputs/results.csv'
-cvs_header = 'detector,attack,category,image,logit,sigmoid,ap,mim'
-
-if not os.path.exists(cvs_file):
-    with open(cvs_file, 'w') as f:
-        f.write(cvs_header + '\n')
-
-CSV_COLS = cvs_header.split(',')
-INDEX_COLS = ["detector", "attack", "category", "image"]
-DATA_COLS = [c for c in CSV_COLS if c not in INDEX_COLS]
-
-df = pd.DataFrame(columns=DATA_COLS)
-df.index = pd.MultiIndex.from_tuples([], names=INDEX_COLS)
-
 
 def _ensure_row(df_: pd.DataFrame, key: tuple) -> None:
     """Ensure MultiIndex row exists so df.loc[...] assignments work."""
@@ -102,6 +88,7 @@ def process_sample(
     overwrite_attacks: bool,
     cache_paths: Dict[Tuple[str, str], str],
     results: Dict[str, Dict[str, List[float]]],
+    df: pd.DataFrame,
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], Dict[str, Any]]:
     """
     Process a single sample for all requested image types.
@@ -363,6 +350,20 @@ def main():
         logger.info(f"Processing detector: {detector_name}")
         logger.info(f"{'=' * 60}")
         
+        cvs_file = 'outputs/results.csv'
+        cvs_header = 'detector,attack,category,image,logit,sigmoid,ap,mim'
+        
+        if not os.path.exists(cvs_file):
+            with open(cvs_file, 'w') as f:
+                f.write(cvs_header + '\n')
+        
+        CSV_COLS = cvs_header.split(',')
+        INDEX_COLS = ["detector", "attack", "category", "image"]
+        DATA_COLS = [c for c in CSV_COLS if c not in INDEX_COLS]
+        
+        df = pd.DataFrame(columns=DATA_COLS)
+        df.index = pd.MultiIndex.from_tuples([], names=INDEX_COLS)
+        
         # Load detector
         try:
             detector = load_detector(detector_name, weights_dict[detector_name], device)
@@ -433,6 +434,7 @@ def main():
                         overwrite_attacks=args.overwrite_attacks,
                         cache_paths=cache_paths,
                         results=results,
+                        df=df,
                     )
                     
                     # Update explanation metrics (only once per sample/image_type)
