@@ -52,8 +52,8 @@ from utils.logging import log_configuration, logger
 from utils.sample_paths import SamplePaths
 from utils.image_loader import load_image
 
-LIME_BATCH_SIZE = 64
-LIME_NUM_SAMPLES = 150
+LIME_BATCH_SIZE = 256
+LIME_NUM_SAMPLES = 256
 
 
 def to_numpy(arr):
