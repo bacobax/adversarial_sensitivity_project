@@ -9,7 +9,7 @@ import torchvision.transforms as T
 from PIL import Image
 from tqdm import tqdm
 
-from detect import _detector_class_by_name
+# from detect import _detector_class_by_name
 from support.base_detector import BaseDetector
 from support.detect_utils import get_device
 

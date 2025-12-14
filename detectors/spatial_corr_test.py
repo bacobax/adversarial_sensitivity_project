@@ -35,7 +35,7 @@ Usage:
         --output_dir outputs/ \
         --max_visualizations 10
 """
-
+import gc
 import os
 from typing import Any, Dict, List, Tuple
 
@@ -307,6 +307,9 @@ def process_sample(
         # vis_data['vuln_maps'][img_type] = vuln / vuln.max()
         # vis_data['gt_masks'][img_type] = mask.astype(np.uint8) * 255
         # vis_data['images'][img_type] = image_np
+    
+    gc.collect()
+    torch.cuda.empty_cache()
     
     return explanation_metrics, vulnerability_metrics, vis_data
 
