@@ -507,6 +507,11 @@ def main():
                 print(f'vuln: ap={np.mean(results['ap_vuln'][img_type]):.4f} mim={np.mean(results['mim_vuln'][img_type]):.4f}')
                 print('*' * 80)
                 print()
+            
+            # Save df
+            logger.info(f"Saving df to csv...")
+            df.reset_index().to_csv(cvs_file, index=False)  # NEW
+            logger.info(f"✓ df saved to: {cvs_file}")
         
         # Save explanation metrics CSV (once per detector, attack-independent)
         logger.info(f"\n{'=' * 60}")
@@ -537,13 +542,5 @@ def main():
     logger.info(f"  [output]/<model>/vis/<attack>/<filename>_grid.png")
     logger.info(f"{'=' * 60}")
     
-    # save df
-    
-    # Save df
-    logger.info(f"Saving df to csv...")
-    df.reset_index().to_csv(cvs_file, index=False)  # NEW
-    logger.info(f"✓ df saved to: {cvs_file}")
-
-
 if __name__ == '__main__':
     main()
