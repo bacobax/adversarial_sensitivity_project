@@ -488,11 +488,6 @@ def main():
                     traceback.print_exc()
                     continue
             
-                # Save df
-                logger.info(f"Saving df to csv...")
-                df.reset_index().to_csv(cvs_file, index=False)  # NEW
-                logger.info(f"✓ df saved to: {cvs_file}")
-            
             # Close progress bar
             pbar.close()
             
@@ -521,6 +516,11 @@ def main():
             #     print('*' * 80)
             #     print()
             
+            # Save df
+            logger.info(f"Saving df to csv...")
+            df.reset_index().to_csv(cvs_file, index=False)  # NEW
+            logger.info(f"✓ df saved to: {cvs_file}")
+        
         # Save explanation metrics CSV (once per detector, attack-independent)
         logger.info(f"\n{'=' * 60}")
         logger.info(f"Saving explanation metrics for {detector_name}...")
