@@ -83,6 +83,7 @@ def _set_cell(df_: pd.DataFrame, key: tuple, col: str, val) -> None:
     _ensure_row(df_, key)
     df_.loc[key, col] = val
 
+
 def to_numpy(arr):
     """Convert tensor or array to numpy array on CPU."""
     if isinstance(arr, torch.Tensor):
@@ -167,10 +168,17 @@ def process_sample(
         image_np = np.array(image_pil)
         
         df_key = (detector.name, attack_type, img_type, os.path.basename(sample.filename))
+        _ensure_row(df, df_key)
+        needs_compute = (
+            exp_orig is None
+            or exp_adv is None
+            or df_key not in df.index
+            or pd.isna(df.loc[df_key, "logit_orig"])
+            or pd.isna(df.loc[df_key, "logit_adv"])
+        )
         
         # compute only if exp_orig or exp_adv are missing
-        if exp_orig is None or exp_adv is None and df_key not in df.index:
-            _ensure_row(df, df_key)
+        if needs_compute:
             if not img_path or not os.path.exists(img_path):
                 continue
             
@@ -218,10 +226,10 @@ def process_sample(
             sigmoid_adv = 1 / (1 + np.exp(-logit_adv))
             
             _set_cell(df, df_key, "logit_orig", float(logit_orig))
-            _set_cell(df, df_key, "logit_adv",  float(logit_adv))
+            _set_cell(df, df_key, "logit_adv", float(logit_adv))
             _set_cell(df, df_key, "sigmoid_orig", float(sigmoid_orig))
-            _set_cell(df, df_key, "sigmoid_adv",  float(sigmoid_adv))
-
+            _set_cell(df, df_key, "sigmoid_adv", float(sigmoid_adv))
+            
             # Compute vulnerability map
             # vuln_map = np.abs(exp_orig - exp_adv)
             exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
@@ -247,7 +255,7 @@ def process_sample(
         else:
             exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
             exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
-            
+        
         if detector.name == 'WaveRep':
             vuln = exp_orig_norm + np.abs(-exp_adv_norm)
         else:
@@ -280,18 +288,18 @@ def process_sample(
         if np.sum(vuln) > 0:
             mass_in_mask_vuln = np.sum(vuln[mask]) / np.sum(vuln)
             results['mim_vuln'][img_type].append(mass_in_mask_vuln)
-
+        
         _set_cell(df, df_key, "ap_orig", ap_orig)
         _set_cell(df, df_key, "ap_vuln", ap_vuln)
         _set_cell(df, df_key, "mim_orig", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
         _set_cell(df, df_key, "mim_vuln", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
-
+        
         vis_data['exp_orig'][img_type] = exp_orig
         vis_data['exp_adv'][img_type] = exp_adv
         vis_data['vuln_maps'][img_type] = vuln / vuln.max()
         vis_data['gt_masks'][img_type] = mask.astype(np.uint8) * 255
         vis_data['images'][img_type] = image_np
-        
+    
     return explanation_metrics, vulnerability_metrics, vis_data
 
 
@@ -529,7 +537,7 @@ def main():
     logger.info(f"{'=' * 60}")
     
     # save df
-
+    
     # Save df
     logger.info(f"Saving df to csv...")
     df.reset_index().to_csv(cvs_file, index=False)  # NEW
