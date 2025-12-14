@@ -158,7 +158,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
             if detector not in DETECTOR_MAP:
                 errors.append(
                     f"Unknown detector: {detector}. "
-                    f"Available: {', '.join(sorted(DETECTOR_MAP.keys()))}"
+                    f"Available: {', '.join(sorted(DETECTOR_MAP.keys()))}",
                 )
     
     # Validate attacks
@@ -169,7 +169,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
             if attack.lower() not in SUPPORTED_ATTACKS:
                 errors.append(
                     f"Unknown attack type: {attack}. "
-                    f"Supported: {', '.join(sorted(SUPPORTED_ATTACKS))}"
+                    f"Supported: {', '.join(sorted(SUPPORTED_ATTACKS))}",
                 )
     
     # Validate image_types
@@ -180,7 +180,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
             if img_type.lower() not in SUPPORTED_IMAGE_TYPES:
                 errors.append(
                     f"Unknown image type: {img_type}. "
-                    f"Supported: {', '.join(sorted(SUPPORTED_IMAGE_TYPES))}"
+                    f"Supported: {', '.join(sorted(SUPPORTED_IMAGE_TYPES))}",
                 )
     
     # Warn about 'real' in image_types

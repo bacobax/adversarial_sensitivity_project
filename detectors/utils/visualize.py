@@ -105,7 +105,7 @@ def create_visualization_grid(
         exp_map = _prep_map(exp_orig, img_type)
         if exp_map is not None:
             if detector_name == "WaveRep":
-                ax.imshow(colorize_cam(exp_map))
+                ax.imshow(colorize_cam(exp_orig[img_type]))
             else:
                 ax.imshow(exp_map, cmap='jet', vmin=0, vmax=1)
         else:
@@ -119,7 +119,7 @@ def create_visualization_grid(
         exp_adv_map = _prep_map(exp_adv, img_type)
         if exp_adv_map is not None:
             if detector_name == "WaveRep":
-                ax.imshow(colorize_cam(exp_adv_map))
+                ax.imshow(colorize_cam(exp_adv[img_type]))
             else:
                 ax.imshow(exp_adv_map, cmap='jet', vmin=0, vmax=1)
         else:

@@ -4,8 +4,6 @@ import numpy as np
 import torch
 from lime import lime_image
 from PIL import Image
-from skimage.segmentation import slic
-from tqdm import tqdm
 
 
 def _make_batch_predict_fn(forward):
@@ -52,7 +50,7 @@ def lime_explain(
     # Fast SLIC segmentation to reduce superpixels and speed up
     try:
         from skimage.segmentation import slic
-
+        
         def default_segmentation_fn(x):
             return slic(x, n_segments=n_segments, compactness=20, start_label=0)
     except Exception:
@@ -75,19 +73,19 @@ def lime_explain(
         single_image = True
     
     cams: List[torch.Tensor] = []
-    for i, img in tqdm(enumerate(images), leave=False):
+    for i, img in enumerate(images):
         if fixed_segments is None:
             segmentation_fn = default_segmentation_fn
         else:
             seg_i = fixed_segments[i] if isinstance(fixed_segments, (list, tuple)) else fixed_segments
             if seg_i.shape != img.shape[:2]:
                 raise ValueError(
-                    f"fixed_segments shape {seg_i.shape} must match image spatial shape {img.shape[:2]}"
+                    f"fixed_segments shape {seg_i.shape} must match image spatial shape {img.shape[:2]}",
                 )
-
+            
             def segmentation_fn(_x, _seg=seg_i):
                 return _seg
-
+        
         explanation = explainer.explain_instance(
             image=img,
             classifier_fn=batch_predict,

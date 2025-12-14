@@ -39,8 +39,10 @@ Usage:
 import os
 from typing import Any, Dict, List, Tuple
 
+import cv2
 import numpy as np
 import torch
+from sklearn.metrics import average_precision_score
 from skimage.segmentation import slic
 from tqdm import tqdm
 
@@ -71,11 +73,12 @@ def process_sample(
     root_dataset: str,
     topk_percents: List[float],
     overwrite_attacks: bool,
-    exp_cache: Dict[str, np.ndarray],
+    cache_paths: Dict[Tuple[str, str], str],
+    results: Dict[str, Dict[str, List[float]]],
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], Dict[str, Any]]:
     """
     Process a single sample for all requested image types.
-    
+
     Args:
         sample: Sample paths
         detector: Base Detector
@@ -84,8 +87,9 @@ def process_sample(
         root_dataset: Root dataset path
         topk_percents: List of top-k percentages
         overwrite_attacks: Whether to overwrite cached attacks
-        exp_cache: Cache for original explanation maps
-    
+        cache_paths: Cache for original explanation maps
+        results: Dict to store results
+
     Returns:
         Tuple of:
             - explanation_metrics: Dict[image_type, metrics_dict]
@@ -159,16 +163,21 @@ def process_sample(
         )
         
         # Compute or get cached original explanation
-        cache_key = (detector.name, img_type, sample.filename)
-        if cache_key in exp_cache:
-            exp_orig = exp_cache[cache_key]
+        cache_path_orig = cache_paths[('orig', img_type)]
+        if os.path.exists(cache_path_orig):
+            exp_orig = np.load(cache_path_orig)
         else:
             exp_orig = to_numpy(detector.explain(image_np, **kwargs))
-            exp_cache[cache_key] = exp_orig
+            np.save(cache_path_orig, exp_orig)
         vis_data['exp_orig'][img_type] = exp_orig
         
         # Compute explanation on attacked image
-        exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
+        cache_path_adv = cache_paths[(attack_type, img_type)]
+        if os.path.exists(cache_path_adv):
+            exp_adv = np.load(cache_path_adv)
+        else:
+            exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
+            np.save(cache_path_adv, exp_adv)
         vis_data['exp_adv'][img_type] = exp_adv
         
         # Compute vulnerability map
@@ -191,6 +200,30 @@ def process_sample(
         # Vulnerability metrics: vuln_map vs gt_mask
         vuln_metrics = evaluate.compute_metrics(vuln_map, gt_mask, topk_percents)
         vulnerability_metrics[img_type] = vuln_metrics
+        
+        vuln = exp_orig_norm + np.abs(-exp_adv_norm)
+        orig = np.clip(exp_orig_norm, 0, None) ** 2
+        vuln = np.clip(vuln, 0, None) ** 2
+        
+        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        if orig.shape != mask.shape:
+            mask = cv2.resize(mask, (orig.shape[1], orig.shape[0]), interpolation=cv2.INTER_AREA)
+        if vuln.shape != mask.shape:
+            mask = cv2.resize(mask, (vuln.shape[1], vuln.shape[0]), interpolation=cv2.INTER_AREA)
+        mask = np.array(mask, dtype=bool)
+        
+        mass_in_mask_orig = np.sum(orig[mask]) / (np.sum(orig) + eps)
+        mass_in_mask_vuln = np.sum(vuln[mask]) / (np.sum(vuln) + eps)
+        
+        flat_mask = mask.reshape(-1).astype(np.uint8)
+        if flat_mask.min() != flat_mask.max():
+            ap_orig = float(average_precision_score(flat_mask, orig.reshape(-1)))
+            ap_vuln = float(average_precision_score(flat_mask, vuln.reshape(-1)))
+            results['ap_orig'][img_type].append(ap_orig)
+            results['ap_vuln'][img_type].append(ap_vuln)
+    
+        results['mim_orig'][img_type].append(mass_in_mask_orig)
+        results['mim_vuln'][img_type].append(mass_in_mask_vuln)
     
     return explanation_metrics, vulnerability_metrics, vis_data
 
@@ -261,9 +294,6 @@ def main():
         exp_aggregator = evaluate.MetricsAggregator()
         exp_processed = set()  # Track which (filename, image_type) have been computed
         
-        # Cache for original explanation maps
-        exp_cache: Dict[str, np.ndarray] = {}
-        
         # Process each attack type
         for attack_idx, attack_type in enumerate(attacks, 1):
             logger.info(f"\n--- [{attack_idx}/{len(attacks)}] Processing attack: {attack_type.upper()} ---")
@@ -281,6 +311,15 @@ def main():
             os.makedirs(attack_output, exist_ok=True)
             vis_output = os.path.join(detector_output, 'vis', attack_type)
             os.makedirs(vis_output, exist_ok=True)
+            pt_output = os.path.join(detector_output, 'maps')
+            os.makedirs(pt_output, exist_ok=True)
+            
+            results = {
+                'ap_orig': {t: [] for t in image_types},
+                'ap_vuln': {t: [] for t in image_types},
+                'mim_orig': {t: [] for t in image_types},
+                'mim_vuln': {t: [] for t in image_types},
+            }
             
             # Process samples
             pbar = tqdm(
@@ -292,8 +331,15 @@ def main():
             for sample in pbar:
                 # Update progress bar with current file
                 pbar.set_postfix_str(f"{sample.filename[:30]}...", refresh=True)
+                base_name = os.path.splitext(sample.filename)[0]
+                
+                cache_paths = {}
+                for img_type in image_types:
+                    cache_paths[('orig', img_type)] = os.path.join(pt_output, f"{base_name}_orig_{img_type}.npy")
+                    cache_paths[(attack_type, img_type)] = os.path.join(pt_output, f"{base_name}_{attack_type}_{img_type}.npy")
+                
                 try:
-                    exp_metrics, vuln_metrics, vis_data = process_sample(
+                    exp_metrics, vuln_metrics, vis_data, = process_sample(
                         sample=sample,
                         detector=detector,
                         attack_type=attack_type,
@@ -301,7 +347,8 @@ def main():
                         root_dataset=args.root_dataset,
                         topk_percents=args.topk_percent,
                         overwrite_attacks=args.overwrite_attacks,
-                        exp_cache=exp_cache,
+                        cache_paths=cache_paths,
+                        results=results
                     )
                     
                     # Update explanation metrics (only once per sample/image_type)
@@ -331,7 +378,6 @@ def main():
                     # Generate visualization if within limit
                     if vis_count < args.max_visualizations:
                         pbar.set_postfix_str(f"Generating visualization {vis_count + 1}/{args.max_visualizations}", refresh=True)
-                        base_name = os.path.splitext(sample.filename)[0]
                         vis_path = os.path.join(vis_output, f"{base_name}_grid.png")
                         
                         try:
@@ -377,6 +423,15 @@ def main():
             else:
                 logger.warning(f"No vulnerability metrics collected for {attack_type}")
             
+                print()
+            for img_type in image_types:
+                print(img_type)
+                print('*'*80)
+                print(f'orig: ap={np.mean(results['ap_orig'][img_type]):.4f} mim={np.mean(results['mim_orig'][img_type]):.4f}')
+                print(f'vuln: ap={np.mean(results['ap_vuln'][img_type]):.4f} mim={np.mean(results['mim_vuln'][img_type]):.4f}')
+                print('*'*80)
+                print()
+        
         # Save explanation metrics CSV (once per detector, attack-independent)
         logger.info(f"\n{'=' * 60}")
         logger.info(f"Saving explanation metrics for {detector_name}...")
