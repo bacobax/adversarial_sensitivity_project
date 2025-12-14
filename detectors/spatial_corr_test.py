@@ -178,7 +178,7 @@ def process_sample(
         #     pd.isna(df.loc[df_key_orig, "logit"])
         # )
         
-        if needs_maps or needs_logits:
+        if needs_maps: # or needs_logits:
             if not img_path or not os.path.exists(img_path):
                 continue
                 
