@@ -36,13 +36,16 @@ Usage:
         --max_visualizations 10
 """
 import gc
+import contextlib
 import os
 from typing import Any, Dict, List, Tuple
 
 import cv2
+import math
 import numpy as np
 import pandas as pd
 import torch
+from PIL import Image
 from skimage.segmentation import slic
 from sklearn.metrics import average_precision_score
 from tqdm import tqdm
@@ -89,6 +92,20 @@ def to_numpy(arr):
     if isinstance(arr, torch.Tensor):
         return arr.detach().cpu().numpy()
     return np.asarray(arr)
+
+
+def _output_to_scalar_logit(out: torch.Tensor) -> float:
+    """Convert model output (possibly spatial) to a single scalar logit."""
+    if not isinstance(out, torch.Tensor):
+        return float(out)
+    out_detached = out.detach()
+    if out_detached.numel() == 1:
+        return float(out_detached.reshape(-1).cpu().item())
+    return float(out_detached.float().mean().cpu().item())
+
+
+def _sigmoid_from_logit(logit: float) -> float:
+    return 1.0 / (1.0 + math.exp(-logit))
 
 
 def process_sample(
@@ -223,20 +240,33 @@ def process_sample(
                 np.save(cache_path_adv, exp_adv)
         
         if needs_logits:
-            # with torch.inference_mode():
-            #     if pd.isna(df.loc[df_key_orig, "logit"]):
-            #         logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0).to('cuda', non_blocking=True))
-            #         sigmoid_orig = torch.sigmoid(logit_orig).item()
-            #         _set_cell(df, df_key_orig, "logit", float(logit_orig))
-            #         _set_cell(df, df_key_orig, "sigmoid", float(sigmoid_orig))
-            #
-            #     if pd.isna(df.loc[df_key_adv, "logit"]):
-            #         logit_adv = detector.forward(detector.transform(adv_image).unsqueeze(0).to('cuda', non_blocking=True))
-            #         sigmoid_adv = torch.sigmoid(logit_adv).item()
-            #         _set_cell(df, df_key_adv, "logit", float(logit_adv))
-            #         _set_cell(df, df_key_adv, "sigmoid", float(sigmoid_adv))
-            
-            #     torch.cuda.empty_cache()
+            device = getattr(detector, "device", None) or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            non_blocking = device.type == "cuda"
+            use_amp = bool(getattr(detector, "use_amp", False)) and device.type == "cuda"
+            amp_ctx = torch.amp.autocast("cuda", dtype=torch.float16) if use_amp else contextlib.nullcontext()
+
+            with torch.inference_mode(), amp_ctx:
+                if pd.isna(df.loc[df_key_orig, "logit"]):
+                    x_orig = detector.transform(image_pil).unsqueeze(0).to(device, non_blocking=non_blocking)
+                    out_orig = detector.forward(x_orig)
+                    logit_orig = _output_to_scalar_logit(out_orig)
+                    sigmoid_orig = _sigmoid_from_logit(logit_orig)
+                    _set_cell(df, df_key_orig, "logit", float(logit_orig))
+                    _set_cell(df, df_key_orig, "sigmoid", float(sigmoid_orig))
+                    del x_orig, out_orig
+
+                if pd.isna(df.loc[df_key_adv, "logit"]):
+                    x_adv = detector.transform(Image.fromarray(adv_image)).unsqueeze(0).to(device, non_blocking=non_blocking)
+                    out_adv = detector.forward(x_adv)
+                    logit_adv = _output_to_scalar_logit(out_adv)
+                    sigmoid_adv = _sigmoid_from_logit(logit_adv)
+                    _set_cell(df, df_key_adv, "logit", float(logit_adv))
+                    _set_cell(df, df_key_adv, "sigmoid", float(sigmoid_adv))
+                    del x_adv, out_adv
+
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+            gc.collect()
             
             # Compute vulnerability map
             exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
