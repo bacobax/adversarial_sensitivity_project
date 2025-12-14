@@ -226,8 +226,8 @@ def process_sample(
             with torch.inference_mode():
                 if pd.isna(df.loc[df_key_orig, "logit"]):
                     logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0).to('cuda', non_blocking=True))
-                    print(logit_orig)
                     sigmoid_orig = torch.sigmoid(logit_orig).item()
+                    print(float(logit_orig), float(sigmoid_orig))
                     _set_cell(df, df_key_orig, "logit", float(logit_orig))
                     _set_cell(df, df_key_orig, "sigmoid", float(sigmoid_orig))
                 
