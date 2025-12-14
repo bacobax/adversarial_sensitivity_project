@@ -223,8 +223,8 @@ def process_sample(
             
             logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0).to('cuda')).detach().cpu()
             logit_adv = detector.forward(detector.transform(adv_image).unsqueeze(0).to('cuda')).detach().cpu()
-            sigmoid_orig = 1 / (1 + np.exp(-logit_orig))
-            sigmoid_adv = 1 / (1 + np.exp(-logit_adv))
+            sigmoid_orig = torch.sigmoid(logit_orig).item()
+            sigmoid_adv = torch.sigmoid(logit_adv).item()
             
             _set_cell(df, df_key, "logit_orig", float(logit_orig))
             _set_cell(df, df_key, "logit_adv", float(logit_adv))
