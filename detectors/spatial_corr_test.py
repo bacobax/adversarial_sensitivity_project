@@ -224,17 +224,20 @@ def process_sample(
                 exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
                 np.save(cache_path_adv, exp_adv)
             
-            if pd.isna(df.loc[df_key_orig, "logit"]):
-                logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0).to('cuda')).detach().cpu()
-                sigmoid_orig = torch.sigmoid(logit_orig).item()
-                _set_cell(df, df_key_orig, "logit", float(logit_orig))
-                _set_cell(df, df_key_orig, "sigmoid", float(sigmoid_orig))
+            with torch.no_grad():
+                if pd.isna(df.loc[df_key_orig, "logit"]):
+                    logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0).to('cuda')).detach().cpu()
+                    sigmoid_orig = torch.sigmoid(logit_orig).item()
+                    _set_cell(df, df_key_orig, "logit", float(logit_orig))
+                    _set_cell(df, df_key_orig, "sigmoid", float(sigmoid_orig))
+                
+                if pd.isna(df.loc[df_key_adv, "logit"]):
+                    logit_adv = detector.forward(detector.transform(adv_image).unsqueeze(0).to('cuda')).detach().cpu()
+                    sigmoid_adv = torch.sigmoid(logit_adv).item()
+                    _set_cell(df, df_key_adv, "logit", float(logit_adv))
+                    _set_cell(df, df_key_adv, "sigmoid", float(sigmoid_adv))
             
-            if pd.isna(df.loc[df_key_adv, "logit"]):
-                logit_adv = detector.forward(detector.transform(adv_image).unsqueeze(0).to('cuda')).detach().cpu()
-                sigmoid_adv = torch.sigmoid(logit_adv).item()
-                _set_cell(df, df_key_adv, "logit", float(logit_adv))
-                _set_cell(df, df_key_adv, "sigmoid", float(sigmoid_adv))
+            torch.cuda.empty_cache()
             
             # Compute vulnerability map
             # vuln_map = np.abs(exp_orig - exp_adv)
