@@ -173,7 +173,7 @@ def process_sample(
         # _ensure_row(df, df_key_adv)
         
         needs_maps = (exp_orig is None) or (exp_adv is None)
-        needs_logits = (
+        needs_logits = False and (
             pd.isna(df.loc[df_key_orig, "logit"]) or
             pd.isna(df.loc[df_key_adv, "logit"])
         )
