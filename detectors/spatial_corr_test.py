@@ -169,8 +169,8 @@ def process_sample(
         
         df_key_orig = (detector.name, 'orig', img_type, os.path.basename(sample.filename))
         df_key_adv = (detector.name, attack_type, img_type, os.path.basename(sample.filename))
-        # _ensure_row(df, df_key_orig)
-        # _ensure_row(df, df_key_adv)
+        _ensure_row(df, df_key_orig)
+        _ensure_row(df, df_key_adv)
         
         needs_maps = (exp_orig is None) or (exp_adv is None)
         needs_logits = False and (
