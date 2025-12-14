@@ -80,7 +80,7 @@ def _ensure_row(key: Tuple[str, str, str, str]) -> None:
 
 def _set_cell(key: Tuple[str, str, str, str], col: str, val) -> None:
     _ensure_row(key)
-    _rows[key][col] = val
+    _rows[key][col] = float(val)
 
 
 def to_numpy(arr):
