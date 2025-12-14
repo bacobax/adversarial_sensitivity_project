@@ -69,7 +69,8 @@ CSV_COLS = cvs_header.split(',')
 INDEX_COLS = ["detector", "attack", "category", "image"]
 DATA_COLS = [c for c in CSV_COLS if c not in INDEX_COLS]
 
-df = pd.DataFrame(columns=DATA_COLS)
+# read df
+df = pd.read_csv(cvs_file)
 df.index = pd.MultiIndex.from_tuples([], names=INDEX_COLS)
 
 
