@@ -173,12 +173,12 @@ def process_sample(
         _ensure_row(df, df_key_adv)
         
         needs_maps = (exp_orig is None) or (exp_adv is None)
-        # needs_logits = (
-        #     pd.isna(df.loc[df_key_adv, "logit"]) or
-        #     pd.isna(df.loc[df_key_orig, "logit"])
-        # )
+        needs_logits = True or (
+            pd.isna(df.loc[df_key_adv, "logit"]) or
+            pd.isna(df.loc[df_key_orig, "logit"])
+        )
         
-        if needs_maps: # or needs_logits:
+        if needs_maps or needs_logits:
             if not img_path or not os.path.exists(img_path):
                 continue
                 
@@ -222,26 +222,26 @@ def process_sample(
                 exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
                 np.save(cache_path_adv, exp_adv)
         
-        # if needs_logits:
-        with torch.inference_mode():
-            # if pd.isna(df.loc[df_key_orig, "logit"]):
-            logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0).to('cuda', non_blocking=True))
-            sigmoid_orig = torch.sigmoid(logit_orig).item()
-            _set_cell(df, df_key_orig, "logit", float(logit_orig))
-            _set_cell(df, df_key_orig, "sigmoid", float(sigmoid_orig))
-            
-            # if pd.isna(df.loc[df_key_adv, "logit"]):
-            logit_adv = detector.forward(detector.transform(adv_image).unsqueeze(0).to('cuda', non_blocking=True))
-            sigmoid_adv = torch.sigmoid(logit_adv).item()
-            _set_cell(df, df_key_adv, "logit", float(logit_adv))
-            _set_cell(df, df_key_adv, "sigmoid", float(sigmoid_adv))
-            
-            torch.cuda.empty_cache()
+        if needs_logits:
+            with torch.inference_mode():
+                # if pd.isna(df.loc[df_key_orig, "logit"]):
+                logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0))
+                sigmoid_orig = torch.sigmoid(logit_orig).item()
+                _set_cell(df, df_key_orig, "logit", float(logit_orig))
+                _set_cell(df, df_key_orig, "sigmoid", float(sigmoid_orig))
+                
+                # if pd.isna(df.loc[df_key_adv, "logit"]):
+                logit_adv = detector.forward(detector.transform(adv_image).unsqueeze(0))
+                sigmoid_adv = torch.sigmoid(logit_adv).item()
+                _set_cell(df, df_key_adv, "logit", float(logit_adv))
+                _set_cell(df, df_key_adv, "sigmoid", float(sigmoid_adv))
+                
+                torch.cuda.empty_cache()
             
             # Compute vulnerability map
-            exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
-            exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
-            vuln_map = exp_orig_norm - exp_adv_norm
+            # exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
+            # exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
+            # vuln_map = exp_orig_norm - exp_adv_norm
             
             # Normalize vulnerability map to [0, 1]
             # if vuln_map.max() > 0:
