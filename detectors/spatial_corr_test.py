@@ -65,8 +65,26 @@ if not os.path.exists(cvs_file):
     with open(cvs_file, 'w') as f:
         f.write(cvs_header + '\n')
 
-df = pd.DataFrame(columns=cvs_header.split(','))
-df.set_index(['detector', 'attack', 'image_type', 'image'], inplace=True)
+CSV_COLS = cvs_header.split(',')
+INDEX_COLS = ["detector", "attack", "image_type", "image"]
+DATA_COLS = [c for c in CSV_COLS if c not in INDEX_COLS]
+
+df = pd.DataFrame(columns=DATA_COLS)
+df.index = pd.MultiIndex.from_tuples([], names=INDEX_COLS)
+
+
+def _ensure_row(df_: pd.DataFrame, key: tuple) -> None:
+    """Ensure MultiIndex row exists so df.loc[...] assignments work."""
+    if key not in df_.index:
+        df_.loc[key, :] = np.nan
+
+
+def _set_cell(df_: pd.DataFrame, key: tuple, col: str, val) -> None:
+    _ensure_row(df_, key)
+    df_.loc[key, col] = val
+
+df_key = (detector.name, attack_type, img_type, os.path.basename(sample.filename))
+_ensure_row(df, df_key)
 
 def to_numpy(arr):
     """Convert tensor or array to numpy array on CPU."""
@@ -196,16 +214,16 @@ def process_sample(
                 exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
                 np.save(cache_path_adv, exp_adv)
             
-            logits_orig = detector.forward(image_np)
-            logits_adv = detector.forward(adv_image)
-            sigmoid_orig = 1 / (1 + np.exp(-logits_orig))
-            sigmoid_adv = 1 / (1 + np.exp(-logits_adv))
+            logit_orig = detector.forward(image_np)
+            logit_adv = detector.forward(adv_image)
+            sigmoid_orig = 1 / (1 + np.exp(-logit_orig))
+            sigmoid_adv = 1 / (1 + np.exp(-logit_adv))
             
-            df[df_key]['logit_orig'] = logits_orig
-            df[df_key]['logit_sdv'] = logits_adv
-            df[df_key]['sigmoid_orig'] = sigmoid_orig
-            df[df_key]['sigmoid_adv'] = sigmoid_adv
-            
+            _set_cell(df, df_key, "logit_orig", float(logit_orig))
+            _set_cell(df, df_key, "logit_adv",  float(logit_adv))
+            _set_cell(df, df_key, "sigmoid_orig", float(sigmoid_orig))
+            _set_cell(df, df_key, "sigmoid_adv",  float(sigmoid_adv))
+
             # Compute vulnerability map
             # vuln_map = np.abs(exp_orig - exp_adv)
             exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
@@ -263,16 +281,15 @@ def process_sample(
         if np.sum(orig) > 0:
             mass_in_mask_orig = np.sum(orig[mask]) / np.sum(orig)
             results['mim_orig'][img_type].append(mass_in_mask_orig)
-            df[df_key]['mim_orig'] = mass_in_mask_orig
-        else:
-            df[df_key]['mim_orig'] = -1
         if np.sum(vuln) > 0:
             mass_in_mask_vuln = np.sum(vuln[mask]) / np.sum(vuln)
             results['mim_vuln'][img_type].append(mass_in_mask_vuln)
-            df[df_key]['mim_vuln'] = mass_in_mask_vuln
-        else:
-            df[df_key]['mim_vuln'] = -1
-        
+
+        _set_cell(df, df_key, "ap_orig", ap_orig)
+        _set_cell(df, df_key, "ap_vuln", ap_vuln)
+        _set_cell(df, df_key, "mim_orig", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
+        _set_cell(df, df_key, "mim_vuln", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
+
         vis_data['exp_orig'][img_type] = exp_orig
         vis_data['exp_adv'][img_type] = exp_adv
         vis_data['vuln_maps'][img_type] = vuln / vuln.max()
@@ -519,7 +536,7 @@ def main():
 
     # Save df
     logger.info(f"Saving df to csv...")
-    df.to_csv(cvs_file, index=False)
+    df.reset_index().to_csv(cvs_file, index=False)  # NEW
     logger.info(f"✓ df saved to: {cvs_file}")
 
 
