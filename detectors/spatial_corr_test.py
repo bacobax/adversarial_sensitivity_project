@@ -83,9 +83,6 @@ def _set_cell(df_: pd.DataFrame, key: tuple, col: str, val) -> None:
     _ensure_row(df_, key)
     df_.loc[key, col] = val
 
-df_key = (detector.name, attack_type, img_type, os.path.basename(sample.filename))
-_ensure_row(df, df_key)
-
 def to_numpy(arr):
     """Convert tensor or array to numpy array on CPU."""
     if isinstance(arr, torch.Tensor):
@@ -170,6 +167,7 @@ def process_sample(
         image_np = np.array(image_pil)
         
         df_key = (detector.name, attack_type, img_type, os.path.basename(sample.filename))
+        _ensure_row(df, df_key)
         
         # compute only if exp_orig or exp_adv are missing
         if exp_orig is None or exp_adv is None and df_key not in df.index:
