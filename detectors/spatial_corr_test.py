@@ -223,6 +223,7 @@ def process_sample(
                 np.save(cache_path_adv, exp_adv)
         
         if needs_logits:
+            print('compute logits')
             with torch.inference_mode():
                 if pd.isna(df.loc[df_key_orig, "logit"]):
                     logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0).to('cuda', non_blocking=True))
@@ -296,11 +297,12 @@ def process_sample(
             mass_in_mask_vuln = np.sum(vuln[mask]) / np.sum(vuln)
             # results['mim_vuln'][img_type].append(mass_in_mask_vuln)
         
-        _set_cell(df, df_key_orig, "ap", ap_orig)
-        _set_cell(df, df_key_adv, "ap", ap_vuln)
-        _set_cell(df, df_key_orig, "mim", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
-        _set_cell(df, df_key_adv, "mim", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
-        
+        if needs_logits:
+            _set_cell(df, df_key_orig, "ap", ap_orig)
+            _set_cell(df, df_key_adv, "ap", ap_vuln)
+            _set_cell(df, df_key_orig, "mim", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
+            _set_cell(df, df_key_adv, "mim", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
+            
         # vis_data['exp_orig'][img_type] = exp_orig
         # vis_data['exp_adv'][img_type] = exp_adv
         # vis_data['vuln_maps'][img_type] = vuln / vuln.max()
