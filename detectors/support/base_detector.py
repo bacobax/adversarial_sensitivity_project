@@ -128,8 +128,9 @@ class BaseDetector(ABC):
         
         attack_detector = AttackDetector(self, self.device)
         attack = build_attack(attack_type, attack_detector)
-        
+        print(f"Len images before prepare_batch: {len(image) if isinstance(image, (list, tuple)) else '1, non array'}")
         image = self.prepare_batch(image, self.transform)
+        print(f"Prepared batch shape: {image.shape}")
         image.requires_grad_(True)
         
         with torch.enable_grad():
@@ -169,6 +170,7 @@ class BaseDetector(ABC):
             if transform is not None:
                 img = transform(img)
             frames.append(img)
+
         
         return torch.stack(frames, 0).to(self.device)
 

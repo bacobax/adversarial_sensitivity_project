@@ -65,7 +65,16 @@ EXPLANATION_CHARTS_DIR = CHARTS_DIR / "explanation"
 VULNERABILITY_CHARTS_DIR = CHARTS_DIR / "vulnerability"
 
 # Metrics to analyze
-MAIN_METRICS = ["mass_frac", "pr_auc", "roc_auc"]
+# Include IoU (stored in CSV as `iou_topk`) as requested
+MAIN_METRICS = ["iou_topk", "mass_frac", "pr_auc", "roc_auc"]
+
+# Friendly display names for metrics
+METRIC_DISPLAY_NAMES = {
+    "iou_topk": "IoU",
+    "mass_frac": "Mass Fraction",
+    "pr_auc": "PR-AUC",
+    "roc_auc": "ROC-AUC",
+}
 
 # Plot style configuration
 plt.style.use("seaborn-v0_8-whitegrid")
@@ -87,6 +96,7 @@ def create_output_directories() -> None:
         CHARTS_DIR,
         EXPLANATION_CHARTS_DIR,
         VULNERABILITY_CHARTS_DIR,
+        CHARTS_DIR / "exp_vs_vuln",
     ]
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
@@ -851,6 +861,143 @@ def generate_vulnerability_charts(df: pd.DataFrame, output_dir: Path) -> None:
     print(f"✓ Vulnerability charts saved to: {output_dir}")
 
 
+def plot_exp_vs_vuln_grid(
+    metric: str,
+    explanation_df: pd.DataFrame,
+    vulnerability_df: pd.DataFrame,
+    output_path: Path,
+    attack_name: str = "pgd",
+) -> None:
+    """
+    Create a grid of histograms comparing explanation vs vulnerability (fixed attack) for
+    a given metric.
+
+    Rows: models
+    Columns: ['samecat', 'diffcat']
+
+    Each cell overlays the histogram of the selected metric for explanation maps
+    (from `explanation_df`) and vulnerability maps filtered to `attack_name` (from `vulnerability_df`).
+    """
+    if explanation_df.empty and vulnerability_df.empty:
+        print(f"  Skipping exp_vs_vuln for {metric}: no data")
+        return
+
+    models = sorted(set(explanation_df.get("model", pd.Series(dtype=str)).unique())
+                    | set(vulnerability_df.get("model", pd.Series(dtype=str)).unique()))
+    if not models:
+        print(f"  Skipping exp_vs_vuln for {metric}: no models found")
+        return
+
+    image_types = ["samecat", "diffcat"]
+
+    nrows = len(models)
+    ncols = len(image_types)
+
+    # Figure size: width fixed, height scales with number of models
+    fig_w = 10
+    fig_h = max(3, nrows * 2.2)
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(fig_w, fig_h), squeeze=False)
+
+    colors = sns.color_palette("husl", 2)
+
+    for i, model in enumerate(models):
+        for j, img_type in enumerate(image_types):
+            ax = axes[i][j]
+
+            # Explanation values (attack-independent)
+            exp_vals = pd.Series(dtype=float)
+            if not explanation_df.empty:
+                exp_vals = explanation_df[
+                    (explanation_df["model"] == model) & (explanation_df["image_type"] == img_type)
+                ][metric].dropna()
+
+            # Vulnerability values filtered to attack (e.g., pgd)
+            vuln_vals = pd.Series(dtype=float)
+            if not vulnerability_df.empty and "attack_type" in vulnerability_df.columns:
+                vuln_vals = vulnerability_df[
+                    (vulnerability_df["model"] == model) &
+                    (vulnerability_df["attack_type"] == attack_name) &
+                    (vulnerability_df["image_type"] == img_type)
+                ][metric].dropna()
+
+            # If both empty, show message
+            if exp_vals.empty and vuln_vals.empty:
+                ax.text(0.5, 0.5, "No data", ha="center", va="center", fontsize=10, color="#666")
+                ax.set_xticks([])
+                ax.set_yticks([])
+                if j == 0:
+                    ax.set_ylabel(model, fontsize=9)
+                continue
+
+            # Determine combined bin edges
+            combined = pd.concat([exp_vals, vuln_vals]) if (not exp_vals.empty or not vuln_vals.empty) else pd.Series([])
+            if combined.empty:
+                bins = 10
+            else:
+                try:
+                    vmin = float(combined.min())
+                    vmax = float(combined.max())
+                    if vmin == vmax:
+                        bins = np.linspace(vmin - 0.001, vmax + 0.001, 10)
+                    else:
+                        bins = np.linspace(vmin, vmax, 20)
+                except Exception:
+                    bins = 10
+
+            # Plot histograms (density normalized)
+            if not exp_vals.empty:
+                ax.hist(exp_vals, bins=bins, density=True, alpha=0.6, label="explain", color=colors[0], edgecolor="black")
+            if not vuln_vals.empty:
+                ax.hist(vuln_vals, bins=bins, density=True, alpha=0.6, label=f"vuln ({attack_name})", color=colors[1], edgecolor="black")
+
+            # Row label
+            if j == 0:
+                ax.set_ylabel(model, fontsize=9)
+
+            # Only top row gets column title
+            if i == 0:
+                ax.set_title(img_type, fontsize=10)
+
+            # Tidy-up
+            ax.tick_params(axis='both', which='major', labelsize=8)
+            if i == nrows - 1:
+                ax.set_xlabel(METRIC_DISPLAY_NAMES.get(metric, metric), fontsize=9)
+
+            # Add legend to first row, second column to avoid repeating
+            if i == 0 and j == ncols - 1:
+                ax.legend(fontsize=8)
+
+    plt.suptitle(f"Explanation vs Vulnerability ({METRIC_DISPLAY_NAMES.get(metric, metric)})", fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(output_path, dpi=FIGURE_DPI, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved: {output_path.name}")
+
+
+def generate_exp_vs_vuln_charts(
+    explanation_df: pd.DataFrame,
+    vulnerability_df: pd.DataFrame,
+    output_dir: Path,
+    metrics: List[str] = MAIN_METRICS,
+) -> None:
+    """Generate exp_vs_vuln grids for each requested metric."""
+    print("Generating Explanation vs Vulnerability charts...")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for metric in metrics:
+        # Skip metric if not present in either dataframe
+        has_exp = (not explanation_df.empty) and (metric in explanation_df.columns)
+        has_vuln = (not vulnerability_df.empty) and (metric in vulnerability_df.columns)
+        if not (has_exp or has_vuln):
+            print(f"  Skipping {metric}: metric not present in data")
+            continue
+
+        out_path = output_dir / f"{metric}_exp_vs_vuln_grid.png"
+        plot_exp_vs_vuln_grid(metric, explanation_df, vulnerability_df, out_path, attack_name="pgd")
+
+    print(f"✓ Exp_vs_vuln charts saved to: {output_dir}")
+
+
 # =============================================================================
 # Main Execution
 # =============================================================================
@@ -900,6 +1047,7 @@ def main() -> None:
         CHARTS_DIR,
         EXPLANATION_CHARTS_DIR,
         VULNERABILITY_CHARTS_DIR,
+        CHARTS_DIR / "exp_vs_vuln",
     ]
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
@@ -928,6 +1076,10 @@ def main() -> None:
     if not vulnerability_df.empty:
         generate_vulnerability_charts(vulnerability_df, VULNERABILITY_CHARTS_DIR)
         print()
+
+    # Generate explanation vs vulnerability comparison charts
+    generate_exp_vs_vuln_charts(explanation_df, vulnerability_df, CHARTS_DIR / "exp_vs_vuln")
+    print()
     
     # Summary
     print("=" * 60)
