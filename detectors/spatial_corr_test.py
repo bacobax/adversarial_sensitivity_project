@@ -167,10 +167,10 @@ def process_sample(
         image_np = np.array(image_pil)
         
         df_key = (detector.name, attack_type, img_type, os.path.basename(sample.filename))
-        _ensure_row(df, df_key)
         
         # compute only if exp_orig or exp_adv are missing
         if exp_orig is None or exp_adv is None and df_key not in df.index:
+            _ensure_row(df, df_key)
             if not img_path or not os.path.exists(img_path):
                 continue
             
@@ -273,8 +273,6 @@ def process_sample(
         ap_vuln = float(average_precision_score(flat_mask, vuln.reshape(-1)))
         results['ap_orig'][img_type].append(ap_orig)
         results['ap_vuln'][img_type].append(ap_vuln)
-        df[df_key]['ap_orig'] = ap_orig
-        df[df_key]['ap_vuln'] = ap_vuln
         
         if np.sum(orig) > 0:
             mass_in_mask_orig = np.sum(orig[mask]) / np.sum(orig)
