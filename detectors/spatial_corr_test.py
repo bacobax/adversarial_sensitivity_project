@@ -240,9 +240,9 @@ def process_sample(
                 torch.cuda.empty_cache()
             
             # Compute vulnerability map
-            exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
-            exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
-            vuln_map = exp_orig_norm - exp_adv_norm
+            # exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
+            # exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
+            # vuln_map = exp_orig_norm - exp_adv_norm
             
             # Normalize vulnerability map to [0, 1]
             # if vuln_map.max() > 0:
@@ -267,7 +267,7 @@ def process_sample(
         if detector.name == 'WaveRep':
             vuln = exp_orig_norm + np.abs(-exp_adv_norm)
         else:
-            vuln = exp_orig_norm - exp_adv_norm
+            vuln = np.abs(exp_orig_norm - exp_adv_norm)
         
         orig = np.clip(exp_orig_norm, 0, None)**2
         vuln = np.clip(vuln, 0, None)**2
