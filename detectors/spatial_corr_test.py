@@ -514,6 +514,13 @@ def main():
     logger.info(f"  [output]/<model>/<attack>/metrics_vulnerability.csv")
     logger.info(f"  [output]/<model>/vis/<attack>/<filename>_grid.png")
     logger.info(f"{'=' * 60}")
+    
+    # save df
+
+    # Save df
+    logger.info(f"Saving df to csv...")
+    df.to_csv(cvs_file, index=False)
+    logger.info(f"✓ df saved to: {cvs_file}")
 
 
 if __name__ == '__main__':
