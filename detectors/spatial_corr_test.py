@@ -239,9 +239,9 @@ def process_sample(
             torch.cuda.empty_cache()
             
             # Compute vulnerability map
-            # exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
-            # exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
-            # vuln_map = exp_orig_norm - exp_adv_norm
+            exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
+            exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
+            vuln_map = exp_orig_norm - exp_adv_norm
             
             # Normalize vulnerability map to [0, 1]
             # if vuln_map.max() > 0:
@@ -296,10 +296,10 @@ def process_sample(
             mass_in_mask_vuln = np.sum(vuln[mask]) / np.sum(vuln)
             # results['mim_vuln'][img_type].append(mass_in_mask_vuln)
         
-        # _set_cell(df, df_key_orig, "ap", ap_orig)
-        # _set_cell(df, df_key_adv, "ap", ap_vuln)
-        # _set_cell(df, df_key_orig, "mim", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
-        # _set_cell(df, df_key_adv, "mim", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
+        _set_cell(df, df_key_orig, "ap", ap_orig)
+        _set_cell(df, df_key_adv, "ap", ap_vuln)
+        _set_cell(df, df_key_orig, "mim", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
+        _set_cell(df, df_key_adv, "mim", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
         
         # vis_data['exp_orig'][img_type] = exp_orig
         # vis_data['exp_adv'][img_type] = exp_adv
