@@ -115,6 +115,15 @@ def process_sample(
             except:
                 pass
             continue
+            
+        exp_orig = None
+        exp_adv = None
+        cache_path_orig = cache_paths[('orig', img_type)]
+        cache_path_adv = cache_paths[(attack_type, img_type)]
+        if os.path.exists(cache_path_orig):
+            exp_orig = np.load(cache_path_orig)
+        if os.path.exists(cache_path_adv):
+            exp_adv = np.load(cache_path_adv)
         
         # Get image path
         if img_type == 'samecat':
@@ -125,82 +134,82 @@ def process_sample(
             mask_path = sample.mask_diffcat
         else:
             continue
-        
-        if not img_path or not os.path.exists(img_path):
-            continue
-        
-        # Load image
-        image_pil = load_image(img_path)
-        image_np = np.array(image_pil)
-        vis_data['images'][img_type] = image_np
-        
-        # Load/compute ground truth mask
-        if img_type == 'samecat':
-            gt_mask = image_loader.load_mask(mask_path)
-        else:  # diffcat
-            gt_mask = image_loader.bbox_to_mask(mask_path, image_np.shape[:2])
-        vis_data['gt_masks'][img_type] = gt_mask
-        
-        kwargs = {}
-        if detector.name == 'WaveRep':
-            fixed_segments = slic(image_np, n_segments=24, compactness=20, start_label=0)
-            kwargs = {
-                'batch_size': LIME_BATCH_SIZE,
-                'num_samples': LIME_NUM_SAMPLES,
-                'fixed_segments': fixed_segments,
-            }
-        
-        # Get or generate attacked image
-        attack_cache_path = attack.get_attack_cache_path(
-            root_dataset, detector.name, attack_type, img_type, sample.filename,
-        )
-        adv_image = attack.get_or_generate_attacked_image(
-            detector=detector,
-            image=image_pil,
-            attack_type=attack_type,
-            cache_path=attack_cache_path,
-            overwrite=overwrite_attacks,
-        )
-        
-        # Compute or get cached original explanation
-        cache_path_orig = cache_paths[('orig', img_type)]
-        if os.path.exists(cache_path_orig):
-            exp_orig = np.load(cache_path_orig)
-        else:
-            exp_orig = to_numpy(detector.explain(image_np, **kwargs))
-            np.save(cache_path_orig, exp_orig)
-        vis_data['exp_orig'][img_type] = exp_orig
-        
-        # Compute explanation on attacked image
-        cache_path_adv = cache_paths[(attack_type, img_type)]
-        if os.path.exists(cache_path_adv):
-            exp_adv = np.load(cache_path_adv)
-        else:
-            exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
-            np.save(cache_path_adv, exp_adv)
-        vis_data['exp_adv'][img_type] = exp_adv
-        
-        # Compute vulnerability map
-        # vuln_map = np.abs(exp_orig - exp_adv)
+            
         eps = 1e-8
+        
+        # compute only if exp_orig or exp_adv are missing
+        if exp_orig is None or exp_adv is None:
+            if not img_path or not os.path.exists(img_path):
+                continue
+            
+            # Load image
+            image_pil = load_image(img_path)
+            image_np = np.array(image_pil)
+            vis_data['images'][img_type] = image_np
+            
+            # Load/compute ground truth mask
+            if img_type == 'samecat':
+                gt_mask = image_loader.load_mask(mask_path)
+            else:  # diffcat
+                gt_mask = image_loader.bbox_to_mask(mask_path, image_np.shape[:2])
+            vis_data['gt_masks'][img_type] = gt_mask
+            
+            kwargs = {}
+            if detector.name == 'WaveRep':
+                fixed_segments = slic(image_np, n_segments=24, compactness=20, start_label=0)
+                kwargs = {
+                    'batch_size': LIME_BATCH_SIZE,
+                    'num_samples': LIME_NUM_SAMPLES,
+                    'fixed_segments': fixed_segments,
+                }
+            
+            # Get or generate attacked image
+            attack_cache_path = attack.get_attack_cache_path(
+                root_dataset, detector.name, attack_type, img_type, sample.filename,
+            )
+            adv_image = attack.get_or_generate_attacked_image(
+                detector=detector,
+                image=image_pil,
+                attack_type=attack_type,
+                cache_path=attack_cache_path,
+                overwrite=overwrite_attacks,
+            )
+            
+            # Compute or get cached original explanation
+            if os.path.exists(cache_path_orig):
+                exp_orig = np.load(cache_path_orig)
+            else:
+                exp_orig = to_numpy(detector.explain(image_np, **kwargs))
+                np.save(cache_path_orig, exp_orig)
+            
+            # Compute explanation on attacked image
+            if os.path.exists(cache_path_adv):
+                exp_adv = np.load(cache_path_adv)
+            else:
+                exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
+                np.save(cache_path_adv, exp_adv)
+            
+            # Compute vulnerability map
+            # vuln_map = np.abs(exp_orig - exp_adv)
+            exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
+            exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
+            vuln_map = exp_orig_norm - exp_adv_norm
+            
+            # Normalize vulnerability map to [0, 1]
+            if vuln_map.max() > 0:
+                vuln_map = vuln_map / vuln_map.max()
+            
+            # Compute metrics
+            # Explanation metrics: exp_orig vs gt_mask
+            exp_metrics = evaluate.compute_metrics(exp_orig, gt_mask, topk_percents)
+            explanation_metrics[img_type] = exp_metrics
+            
+            # Vulnerability metrics: vuln_map vs gt_mask
+            vuln_metrics = evaluate.compute_metrics(vuln_map, gt_mask, topk_percents)
+            vulnerability_metrics[img_type] = vuln_metrics
+        
         exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
         exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
-        vuln_map = exp_orig_norm - exp_adv_norm
-        
-        # Normalize vulnerability map to [0, 1]
-        if vuln_map.max() > 0:
-            vuln_map = vuln_map / vuln_map.max()
-        vis_data['vuln_maps'][img_type] = vuln_map
-        
-        # Compute metrics
-        # Explanation metrics: exp_orig vs gt_mask
-        exp_metrics = evaluate.compute_metrics(exp_orig, gt_mask, topk_percents)
-        explanation_metrics[img_type] = exp_metrics
-        
-        # Vulnerability metrics: vuln_map vs gt_mask
-        vuln_metrics = evaluate.compute_metrics(vuln_map, gt_mask, topk_percents)
-        vulnerability_metrics[img_type] = vuln_metrics
-        
         vuln = exp_orig_norm + np.abs(-exp_adv_norm)
         orig = np.clip(exp_orig_norm, 0, None) ** 2
         vuln = np.clip(vuln, 0, None) ** 2
@@ -225,6 +234,10 @@ def process_sample(
         results['mim_orig'][img_type].append(mass_in_mask_orig)
         results['mim_vuln'][img_type].append(mass_in_mask_vuln)
     
+        vis_data['exp_orig'][img_type] = exp_orig
+        vis_data['exp_adv'][img_type] = exp_adv
+        vis_data['vuln_maps'][img_type] = vuln
+        
     return explanation_metrics, vulnerability_metrics, vis_data
 
 
