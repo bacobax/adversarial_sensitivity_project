@@ -309,6 +309,7 @@ def process_sample(
     gc.collect()
     torch.cuda.empty_cache()
     
+    print(len(_rows))
     return explanation_metrics, vulnerability_metrics, vis_data
 
 
