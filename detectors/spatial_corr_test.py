@@ -54,6 +54,7 @@ from utils.detector_loader import load_detector
 from utils.image_loader import load_image
 from utils.logging import log_configuration, logger
 from utils.sample_paths import SamplePaths
+from PIL import Image
 
 LIME_BATCH_SIZE = 256
 LIME_NUM_SAMPLES = 256
@@ -220,8 +221,8 @@ def process_sample(
                 exp_adv = to_numpy(detector.explain(adv_image, **kwargs))
                 np.save(cache_path_adv, exp_adv)
             
-            logit_orig = detector.forward(image_np)
-            logit_adv = detector.forward(adv_image)
+            logit_orig = detector.forward(detector.transform(image_np).unsqueeze(0).to('cuda')).detach().cpu()
+            logit_adv = detector.forward(detector.transform(adv_image).unsqueeze(0).to('cuda')).detach().cpu()
             sigmoid_orig = 1 / (1 + np.exp(-logit_orig))
             sigmoid_adv = 1 / (1 + np.exp(-logit_adv))
             
