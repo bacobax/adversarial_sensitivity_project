@@ -187,7 +187,7 @@ def collect_sample_paths(
     bfree = os.path.join(root_dataset, 'b-free')
     real_folder = os.path.join(bfree, 'real')
     
-    filenames = list_images(real_folder)[:81]
+    filenames = list_images(real_folder)
     if not filenames:
         raise FileNotFoundError(f"No images found in {real_folder}")
     

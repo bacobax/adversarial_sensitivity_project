@@ -6,12 +6,9 @@
 
 ## Models
 
-- [CLIP-D](https://github.com/grip-unina/ClipBased-SyntheticImageDetection)
-- [NPR](https://github.com/chuangchuangtan/NPR-DeepfakeDetection)
-- [P2G](https://github.com/laitifranz/Prompt2Guard)
 - [R50_nodown](https://grip-unina.github.io/DMimageDetection)
-- [R50_TF](https://github.com/MMLab-unitn/TrueFake-IJCNN25)
 - [WaveRep](https://grip-unina.github.io/WaveRep-SyntheticVideoDetection/)
+- [AnomalyOV](https://github.com/honda-research-institute/Anomaly-OneVision)
 
 ## Download Weights
 
@@ -25,10 +22,6 @@ Download also the classes for P2G detector from [classes.pkl](https://github.com
 ## Dataset
 
 The dataset used for evaluation is [B-Free](https://github.com/grip-unina/B-Free), downloaded from [here](https://www.grip.unina.it/download/prog/B-Free/training_data/).
-
-## Results
-
-![results.png](results.png)
 
 ## Usage
 
@@ -44,10 +37,6 @@ python3.13 detect.py \
 ```
 
 ## Requirements
-
-```bash
-python3.13 -m pip install -r requirements.txt
-```
 
 ```bash
 conda env create -f environment.yml
