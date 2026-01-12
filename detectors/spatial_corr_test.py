@@ -302,11 +302,11 @@ def process_sample(
         _set_cell(df, df_key_orig, "mim", float(mass_in_mask_orig) if np.sum(orig) > 0 else -1.0)
         _set_cell(df, df_key_adv, "mim", float(mass_in_mask_vuln) if np.sum(vuln) > 0 else -1.0)
             
-        # vis_data['exp_orig'][img_type] = exp_orig
-        # vis_data['exp_adv'][img_type] = exp_adv
-        # vis_data['vuln_maps'][img_type] = vuln / vuln.max()
-        # vis_data['gt_masks'][img_type] = mask.astype(np.uint8) * 255
-        # vis_data['images'][img_type] = image_np
+        vis_data['exp_orig'][img_type] = exp_orig
+        vis_data['exp_adv'][img_type] = exp_adv
+        vis_data['vuln_maps'][img_type] = vuln / vuln.max()
+        vis_data['gt_masks'][img_type] = mask.astype(np.uint8) * 255
+        vis_data['images'][img_type] = image_np
     
     return explanation_metrics, vulnerability_metrics, vis_data
 
