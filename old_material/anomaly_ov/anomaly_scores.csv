@@ -1,0 +1,10 @@
+image_path,anomaly_score
+./ctx_ZS_AD_dataset/000000000030.png,0.08935546875
+./ctx_ZS_AD_dataset/000000000071.png,0.99609375
+./ctx_ZS_AD_dataset/000000000089.png,0.91015625
+./ctx_ZS_AD_dataset/000000000196.png,0.130859375
+./ctx_ZS_AD_dataset/000000000294.png,0.0257568359375
+./ctx_ZS_AD_dataset/000000000825.png,0.0006256103515625
+./ctx_ZS_AD_dataset/000000001064.png,0.8828125
+./ctx_ZS_AD_dataset/000000001907.png,0.08056640625
+./ctx_ZS_AD_dataset/000000002279.png,0.53515625
