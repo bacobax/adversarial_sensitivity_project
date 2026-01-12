@@ -196,6 +196,8 @@ def process_sample(
         
         # compute only if exp_orig or exp_adv are missing
         if needs_maps:
+            
+            ## OLD CODE FOR COMPUTATION WITHOUT CACHING
             # Load/compute ground truth mask
             # if img_type == 'samecat':
             #     gt_mask = image_loader.load_mask(mask_path)
@@ -238,6 +240,7 @@ def process_sample(
             
                 torch.cuda.empty_cache()
             
+            ## OLD CODE FOR COMPUTATION WITHOUT CACHING
             # Compute vulnerability map
             # exp_orig_norm = exp_orig / (np.abs(exp_orig).sum() + eps)
             # exp_adv_norm = exp_adv / (np.abs(exp_adv).sum() + eps)
