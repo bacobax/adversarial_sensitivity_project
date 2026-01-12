@@ -15,9 +15,12 @@ __pycache__
 *.gz
 *.ckpt
 
-detectors/out
+out
 datasets/**/*.png
 results*.csv
 weights_dino*
 */**/finetune_dataset
 !000000000*.png
+
+models/**/*.png
+datasets/*
