@@ -1,5 +1,12 @@
 # Image Deepfake Detectors Adapter
 
+## Clone the Repo
+
+Use the following command to clone only the latest version and avoid heavy history and branches:
+```bash
+git clone --depth 1 --branch main --single-branch https://github.com/bacobax/adversarial_sensitivity_project.git
+```
+
 ## Base Repository
 
 - [Image Deepfake Detectors Public Library](https://github.com/truebees-ai/Image-Deepfake-Detectors-Public-Library)
